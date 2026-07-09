@@ -1,23 +1,21 @@
-mod cli;
-mod server;
-
 use clap::Parser;
+use rts::cli;
+use rts::server;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let args = cli::args::Args::parse();
 
     match args.command {
         cli::args::Commands::Server => {
-            println!("Starting RTS server");
-            tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()
-                .unwrap()
-                .block_on(server::server());
+            server::server(rts::get_server_host()).await;
         }
-        cli::args::Commands::Run { command } => {
-            println!("Executing command: {}", command.join(" "));
-        }
+        cli::args::Commands::Run { command, label } => rts::push_task(command.join(" "), label)
+            .await
+            .unwrap_or_else(|e| eprintln!("Error pushing task: {}", e)),
+        cli::args::Commands::List => rts::list_tasks()
+            .await
+            .unwrap_or_else(|e| eprintln!("Error listing tasks: {}", e)),
         cli::args::Commands::Config { num_slot } => {
             println!("Configuring RTS server with {} simultaneous jobs", num_slot);
         }

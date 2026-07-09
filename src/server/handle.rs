@@ -1,6 +1,6 @@
 use super::errors::ServerError;
+use super::scheme::{ConfigureRequest, ListTaskResponse, PushTaskRequest};
 use super::state::{ServerState, Task, TaskStatus};
-use super::scheme::{PushTaskRequest, ConfigureRequest};
 use axum::Json;
 use axum::extract::State;
 use serde_json::Value;
@@ -11,10 +11,11 @@ pub async fn list_tasks(State(state): State<Arc<ServerState>>) -> Result<Json<Va
     let tasks_json: Vec<Value> = tasks
         .iter()
         .map(|task| {
-            serde_json::json!({
-                "id": task.id,
-                "command": task.command,
-                "status": task.status
+            serde_json::json!(ListTaskResponse {
+                id: task.id,
+                label: task.label.clone(),
+                status: task.status.clone(),
+                command: task.command.clone(),
             })
         })
         .collect();
@@ -24,7 +25,7 @@ pub async fn list_tasks(State(state): State<Arc<ServerState>>) -> Result<Json<Va
 pub async fn push_task(
     State(state): State<Arc<ServerState>>,
     Json(request): Json<PushTaskRequest>,
-) -> Result<Json<Value>, ServerError> {
+) -> Result<(), ServerError> {
     let mut task_id_counter = state.task_id_counter.lock().await;
     let task = Task {
         id: *task_id_counter,
@@ -33,14 +34,8 @@ pub async fn push_task(
         status: TaskStatus::Pending,
     };
     *task_id_counter += 1;
-    state.tasks.lock().await.push(task.clone());
-    println!("Task {} pushed to the queue", task.id);
-    Ok(Json(serde_json::json!({
-        "id": task.id,
-        "label": task.label,
-        "command": task.command,
-        "status": task.status
-    })))
+    state.tasks.lock().await.push(task);
+    Ok(())
 }
 
 pub async fn configure(
@@ -50,7 +45,6 @@ pub async fn configure(
     if let Some(num_slot) = request.num_slot {
         let mut num_slot_lock = state.num_slots.lock().await;
         *num_slot_lock = num_slot;
-        println!("Number of slots configured to {}", num_slot);
     }
     Ok(())
 }

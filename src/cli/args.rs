@@ -16,10 +16,16 @@ pub enum Commands {
     /// Execute a command (trailing args)
     #[command(trailing_var_arg = true)]
     Run {
+        /// Optional label for the command
+        #[arg(short, long)]
+        label: Option<String>,
         /// The command to execute
         #[arg(required = true, allow_hyphen_values = true)]
         command: Vec<String>,
     },
+
+    /// List tasks
+    List,
 
     /// Configure the RTS server
     Config {
