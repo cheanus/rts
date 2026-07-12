@@ -30,20 +30,19 @@ fn new_task(task_id: u32, command: &str, tx: Sender<ChannelMessage>) {
                             tx.send(ChannelMessage {
                                 task_id: Some(TaskId::Old(task_id)),
                                 task_action,
-                            }).unwrap();
+                            }).expect("Channel sender failed send message");
                             break;
                         }
                     }
                 }
             });
         }
-        Err(_) => {
-            tx.send(ChannelMessage {
+        Err(_) => tx
+            .send(ChannelMessage {
                 task_id: Some(TaskId::Old(task_id)),
                 task_action: TaskAction::Fail,
             })
-            .unwrap();
-        }
+            .expect("Channel sender failed send message"),
     }
 }
 
