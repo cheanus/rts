@@ -13,13 +13,18 @@ pub fn get_server_host() -> String {
 
 pub async fn list_tasks() -> Result<(), Box<dyn Error>> {
     let server_host = get_server_host();
-    println!("Task list");
-    println!("ID\tlabel\tstatus\tcommand");
-    let task_list = reqwest::get(format!("http://{server_host}/tasks/list"))
+
+    let ListTaskResponse {
+        num_slots,
+        used_slots,
+        tasks,
+    } = reqwest::get(format!("http://{server_host}/tasks/list"))
         .await?
-        .json::<Vec<ListTaskResponse>>()
+        .json::<ListTaskResponse>()
         .await?;
-    for task in task_list {
+    println!("Task list");
+    println!("ID\tlabel\tstatus\tcommand ({}/{})", used_slots, num_slots);
+    for task in tasks {
         println!(
             "{}\t{}\t{:?}\t{}",
             task.id,
@@ -41,6 +46,19 @@ pub async fn push_task(command: String, label: Option<String>) -> Result<(), Box
     let client = reqwest::Client::new();
     client
         .post(format!("http://{server_host}/tasks/push"))
+        .json(&data)
+        .send()
+        .await?;
+    Ok(())
+}
+
+pub async fn configure(num_slots: u32) -> Result<(), Box<dyn Error>> {
+    let server_host = get_server_host();
+    let mut data = HashMap::new();
+    data.insert("num_slots", num_slots);
+    let client = reqwest::Client::new();
+    client
+        .post(format!("http://{server_host}/configure"))
         .json(&data)
         .send()
         .await?;

@@ -6,9 +6,7 @@ use serde_json::json;
 #[derive(Debug)]
 pub enum ServerError {
     InvalidJson(String),
-    MissingFields(String),
     InternalError(String),
-    InvalidParams(String),
 }
 
 impl IntoResponse for ServerError {
@@ -17,14 +15,8 @@ impl IntoResponse for ServerError {
             ServerError::InvalidJson(ref msg) => {
                 (StatusCode::BAD_REQUEST, "INVALID_JSON", msg.as_str())
             }
-            ServerError::MissingFields(ref msg) => {
-                (StatusCode::BAD_REQUEST, "MISSING_FIELDS", msg.as_str())
-            }
             ServerError::InternalError(ref msg) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", msg.as_str())
-            }
-            ServerError::InvalidParams(ref msg) => {
-                (StatusCode::BAD_REQUEST, "INVALID_PARAMS", msg.as_str())
             }
         };
 

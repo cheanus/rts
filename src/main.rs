@@ -16,8 +16,8 @@ async fn main() {
         cli::args::Commands::List => rts::list_tasks()
             .await
             .unwrap_or_else(|e| eprintln!("Error listing tasks: {}", e)),
-        cli::args::Commands::Config { num_slot } => {
-            println!("Configuring RTS server with {} simultaneous jobs", num_slot);
-        }
+        cli::args::Commands::Config { num_slots } => rts::configure(num_slots)
+            .await
+            .unwrap_or_else(|e| eprintln!("Error configure: {}", e)),
     }
 }

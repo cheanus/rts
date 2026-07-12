@@ -1,13 +1,14 @@
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, watch::Sender};
 
 pub struct ServerState {
     pub num_slots: Mutex<u32>,
     pub used_slots: Mutex<u32>,
     pub task_id_counter: Mutex<u32>,
     pub tasks: Mutex<Vec<Task>>,
+    pub tx: Mutex<Sender<ChannelMessage>>,
 }
 
-#[derive(Clone, serde::Deserialize)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct Task {
     pub id: u32,
     pub label: Option<String>,
@@ -15,7 +16,7 @@ pub struct Task {
     pub command: String,
 }
 
-#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum TaskStatus {
     Pending,
     Running,
@@ -23,8 +24,22 @@ pub enum TaskStatus {
     Failed,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum TaskId {
+    Old(u32),
+    New,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum TaskAction {
+    Run,
+    // Remove,
+    Complete,
+    Fail,
+}
+
 #[derive(Clone, Copy)]
 pub struct ChannelMessage {
-    pub task_id: u32,
-    pub task_status: TaskStatus,
+    pub task_id: Option<TaskId>,
+    pub task_action: TaskAction,
 }
