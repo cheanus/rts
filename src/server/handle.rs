@@ -4,10 +4,11 @@ use super::state::{ServerState, Task, TaskId, TaskStatus};
 use crate::server::state::{ChannelMessage, TaskAction};
 use axum::Json;
 use axum::extract::State;
-use serde_json::Value;
 use std::sync::Arc;
 
-pub async fn list_tasks(State(state): State<Arc<ServerState>>) -> Result<Json<Value>, ServerError> {
+pub async fn list_tasks(
+    State(state): State<Arc<ServerState>>,
+) -> Result<Json<ListTaskResponse>, ServerError> {
     let tasks = state.tasks.lock().await;
     let num_slots = state.num_slots.lock().await;
     let used_slots = state.used_slots.lock().await;
@@ -16,7 +17,7 @@ pub async fn list_tasks(State(state): State<Arc<ServerState>>) -> Result<Json<Va
         used_slots: *used_slots,
         tasks: tasks.clone(),
     };
-    Ok(Json(serde_json::json!(list_tasks_json)))
+    Ok(Json(list_tasks_json))
 }
 
 pub async fn push_task(

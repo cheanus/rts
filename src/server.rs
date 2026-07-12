@@ -32,7 +32,7 @@ pub async fn server(server_host: String) {
     });
 
     // 创建 rx 处理线程
-    let rx_worker_fut = workers::rx_worker(tx, rx, state.clone());
+    let rx_worker_fut = workers::rx_worker(tx, rx, Arc::clone(&state));
 
     let app = Router::new()
         .route("/health", get(|| async { "Hello, World!" }))

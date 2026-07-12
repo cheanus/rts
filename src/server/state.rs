@@ -40,7 +40,6 @@ pub enum TaskAction {
     Fail,
 }
 
-#[derive(Clone, Copy)]
 pub struct ChannelMessage {
     pub task_id: Option<TaskId>,
     pub task_action: TaskAction,

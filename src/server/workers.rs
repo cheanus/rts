@@ -83,7 +83,7 @@ pub async fn rx_worker(
         };
 
         let mut tasks = state.tasks.lock().await;
-        let num_slots = state.num_slots.lock().await.clone();
+        let num_slots = *state.num_slots.lock().await;
         let mut used_slots = state.used_slots.lock().await;
         match task_id {
             TaskId::New => {
