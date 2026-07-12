@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use tokio::sync::{Mutex, watch::Sender};
 
 pub struct ServerState {
@@ -14,6 +15,7 @@ pub struct Task {
     pub label: Option<String>,
     pub status: TaskStatus,
     pub command: String,
+    pub path: Option<PathBuf>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

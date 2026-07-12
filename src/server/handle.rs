@@ -27,8 +27,9 @@ pub async fn push_task(
     let task = Task {
         id: *task_id_counter,
         label: request.label,
-        command: request.command,
         status: TaskStatus::Pending,
+        command: request.command,
+        path: None,
     };
     *task_id_counter += 1;
     state.tasks.lock().await.push(task);

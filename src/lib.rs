@@ -5,6 +5,7 @@ use server::scheme::ListTaskResponse;
 use std::collections::HashMap;
 use std::env;
 use std::error::Error;
+use std::path::PathBuf;
 
 pub fn get_server_host() -> String {
     let server_port = env::var("RTS_SERVER_PORT").unwrap_or_else(|_| "20110".to_string());
@@ -23,12 +24,16 @@ pub async fn list_tasks() -> Result<(), Box<dyn Error>> {
         .json::<ListTaskResponse>()
         .await?;
     println!("Task list");
-    println!("ID\tlabel\tstatus\tcommand ({}/{})", used_slots, num_slots);
+    println!(
+        "ID\tLabel\tOutput\tStatus\tCommand ({}/{})",
+        used_slots, num_slots
+    );
     for task in tasks {
         println!(
-            "{}\t{}\t{:?}\t{}",
+            "{}\t{}\t{}\t{:?}\t{}",
             task.id,
             task.label.as_deref().unwrap_or(""),
+            task.path.unwrap_or(PathBuf::from("")).display(),
             task.status,
             task.command
         )

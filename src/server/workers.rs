@@ -1,56 +1,55 @@
 use super::state::{ChannelMessage, ServerState, Task, TaskAction, TaskStatus};
 use crate::server::state::TaskId;
+use std::error::Error;
+use std::path::PathBuf;
+use std::process::Stdio;
 use std::sync::Arc;
+use tempfile::NamedTempFile;
 use tokio::process;
 use tokio::sync::{
     MutexGuard,
     watch::{Receiver, Sender},
 };
-use tokio::time::{self, Duration};
 
-fn new_task(task_id: u32, command: &str, tx: Sender<ChannelMessage>) {
-    let child_result = process::Command::new("sh").arg("-c").arg(command).spawn();
-    match child_result {
-        Ok(mut child) => {
-            // 启用一个新线程监控新进程中所执行的命令
-            tokio::spawn(async move {
-                let mut interval = time::interval(Duration::from_secs(1));
-                interval.tick().await; // skip first
-                loop {
-                    tokio::select! {
-                        _ = interval.tick() => {
-                            println!("[Monitor] task ID {} alive", task_id);
-                            // tx.send(...) 可更新更详细的状态
-                        }
-                        status = child.wait() => {
-                            let task_action = match status {
-                                Ok(s) if s.success() => TaskAction::Complete,
-                                _ => TaskAction::Fail,
-                            };
-                            tx.send(ChannelMessage {
-                                task_id: Some(TaskId::Old(task_id)),
-                                task_action,
-                            }).expect("Channel sender failed send message");
-                            break;
-                        }
-                    }
-                }
-            });
-        }
-        Err(_) => tx
-            .send(ChannelMessage {
-                task_id: Some(TaskId::Old(task_id)),
-                task_action: TaskAction::Fail,
-            })
-            .expect("Channel sender failed send message"),
-    }
+fn send_task_action(tx: Sender<ChannelMessage>, task_id: u32, task_action: TaskAction) {
+    tx.send(ChannelMessage {
+        task_id: Some(TaskId::Old(task_id)),
+        task_action,
+    })
+    .expect("Channel sender failed send message");
 }
 
-async fn try_new_task(
+fn create_task(
+    task_id: u32,
+    command: &str,
+    tx: Sender<ChannelMessage>,
+) -> Result<PathBuf, Box<dyn Error>> {
+    let log = NamedTempFile::new_in("/tmp/rtx")?;
+
+    let mut child = process::Command::new("sh")
+        .arg("-c")
+        .arg(command)
+        .stdout(Stdio::from(log.reopen()?))
+        .stderr(Stdio::from(log.reopen()?))
+        .spawn()?;
+    // 启用一个新线程监控新进程中所执行的命令
+    tokio::spawn(async move {
+        let status = child.wait().await;
+        let task_action = match status {
+            Ok(s) if s.success() => TaskAction::Complete,
+            _ => TaskAction::Fail,
+        };
+        send_task_action(tx, task_id, task_action);
+    });
+    let (_file, persistent_path) = log.keep()?;
+    Ok(persistent_path)
+}
+
+async fn try_create_tasks(
     mut used_slots: MutexGuard<'_, u32>,
     num_slots: u32,
     mut tasks: MutexGuard<'_, Vec<Task>>,
-    tx: Sender<ChannelMessage>,
+    tx: &Sender<ChannelMessage>,
 ) {
     for task in tasks.iter_mut() {
         // 槽位满则 break
@@ -60,7 +59,10 @@ async fn try_new_task(
         if task.status == TaskStatus::Pending {
             *used_slots += 1;
             task.status = TaskStatus::Running;
-            new_task(task.id, &task.command, tx.clone());
+            match create_task(task.id, &task.command, tx.clone()) {
+                Ok(log_path) => task.path = Some(log_path),
+                Err(_) => send_task_action(tx.clone(), task.id, TaskAction::Fail),
+            }
         }
     }
 }
@@ -87,7 +89,7 @@ pub async fn rx_worker(
             TaskId::New => {
                 // 尝试添加、运行新任务
                 if task_action == TaskAction::Run {
-                    try_new_task(used_slots, num_slots, tasks, tx.clone()).await;
+                    try_create_tasks(used_slots, num_slots, tasks, &tx).await;
                 }
             }
             TaskId::Old(task_id) => {
@@ -105,7 +107,7 @@ pub async fn rx_worker(
                             }
                             _ => {}
                         }
-                        try_new_task(used_slots, num_slots, tasks, tx.clone()).await;
+                        try_create_tasks(used_slots, num_slots, tasks, &tx).await;
                         break;
                     }
                 }
