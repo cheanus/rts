@@ -1,5 +1,5 @@
-use std::path::PathBuf;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use tokio::sync::{Mutex, watch::Sender};
 
 pub struct ServerState {
@@ -10,7 +10,7 @@ pub struct ServerState {
     pub tx: Mutex<Sender<ChannelMessage>>,
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Task {
     pub label: Option<String>,
     pub status: TaskStatus,
@@ -26,13 +26,13 @@ pub enum TaskStatus {
     Failed,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TaskId {
     Old(u32),
     New,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TaskAction {
     Run,
     // Remove,
@@ -40,6 +40,7 @@ pub enum TaskAction {
     Fail,
 }
 
+#[derive(Debug, PartialEq, Eq)]
 pub struct ChannelMessage {
     pub task_id: Option<TaskId>,
     pub task_action: TaskAction,

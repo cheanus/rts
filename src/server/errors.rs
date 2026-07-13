@@ -1,7 +1,9 @@
+use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
 use serde_json::json;
+use std::error::Error;
+use std::fmt;
 
 #[derive(Debug)]
 pub enum ServerError {
@@ -15,9 +17,11 @@ impl IntoResponse for ServerError {
             ServerError::InvalidJson(ref msg) => {
                 (StatusCode::BAD_REQUEST, "INVALID_JSON", msg.as_str())
             }
-            ServerError::InternalError(ref msg) => {
-                (StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", msg.as_str())
-            }
+            ServerError::InternalError(ref msg) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "INTERNAL_ERROR",
+                msg.as_str(),
+            ),
         };
 
         let body = json!({
@@ -34,3 +38,11 @@ impl From<serde_json::Error> for ServerError {
         ServerError::InvalidJson(e.to_string())
     }
 }
+
+impl fmt::Display for ServerError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "ServerError: {}", self.to_string())
+    }
+}
+
+impl Error for ServerError {}

@@ -80,7 +80,7 @@ pub async fn rx_worker(
         } = *rx.borrow();
 
         let Some(task_id) = task_id else {
-            break;
+            continue;
         };
 
         let mut tasks = state.tasks.lock().await;
@@ -115,4 +115,70 @@ pub async fn rx_worker(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::*;
+    use tokio::sync::{Mutex, watch};
+    use tokio::time;
+
+    async fn is_tasks_status_eq(state: Arc<ServerState>, true_state: [(u32, TaskStatus); 3]) {
+        let status_list: HashMap<u32, TaskStatus> = state
+            .tasks
+            .lock()
+            .await
+            .iter()
+            .map(|(id, task)| (*id, task.status))
+            .collect();
+        assert_eq!(status_list, HashMap::from(true_state));
+    }
+
+    #[tokio::test]
+    async fn test_rx_worker() -> Result<(), Box<dyn Error>> {
+        let (tx, rx) = watch::channel(ChannelMessage {
+            task_id: None,
+            task_action: TaskAction::Complete,
+        });
+        let mut tasks = HashMap::new();
+        for task_id in 0..3 {
+            tasks.insert(
+                task_id,
+                Task {
+                    label: None,
+                    status: TaskStatus::Pending,
+                    command: "sleep 10".to_string(),
+                    path: None,
+                },
+            );
+        }
+        let state = Arc::new(ServerState {
+            num_slots: Mutex::new(1),
+            used_slots: Mutex::new(0),
+            task_id_counter: Mutex::new(3),
+            tasks: Mutex::new(tasks),
+            tx: Mutex::new(tx.clone()),
+        });
+        let tx_clone = tx.clone();
+        let state_clone = Arc::clone(&state);
+        tokio::spawn(async move { rx_worker(tx_clone, rx, state_clone).await });
+
+        tx.send(ChannelMessage {
+            task_id: Some(TaskId::New),
+            task_action: TaskAction::Run,
+        })?;
+        time::sleep(Duration::from_millis(100)).await;
+        is_tasks_status_eq(
+            state,
+            [
+                (0, TaskStatus::Running),
+                (1, TaskStatus::Pending),
+                (2, TaskStatus::Pending),
+            ],
+        )
+        .await;
+        Ok(())
+    }
 }

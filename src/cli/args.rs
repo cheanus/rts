@@ -32,5 +32,5 @@ pub enum Commands {
         /// Get/set the number of max simultaneous jobs
         #[arg(short = 'S', default_value_t = 1)]
         num_slots: u32,
-    }
+    },
 }
