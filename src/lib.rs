@@ -41,10 +41,17 @@ pub async fn list_tasks() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-pub async fn push_task(command: String, label: Option<String>) -> Result<(), Box<dyn Error>> {
+pub async fn push_task(
+    label: Option<String>,
+    path: Option<String>,
+    command: String,
+) -> Result<(), Box<dyn Error>> {
     let server_host = get_server_host();
     let mut data = HashMap::new();
     data.insert("command", command);
+    if let Some(p) = path {
+        data.insert("path", p);
+    }
     if let Some(l) = label {
         data.insert("label", l);
     }

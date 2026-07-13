@@ -7,17 +7,11 @@ mod workers;
 use axum::{Router, routing::get, routing::post};
 use state::{ChannelMessage, ServerState, TaskAction};
 use std::collections::HashMap;
-use std::fs;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::{Mutex, watch};
 
 pub async fn server(server_host: String) {
-    // 创建 /tmp/rtx/ 临时目录
-    fs::create_dir_all("/tmp/rtx").unwrap_or_else(|e| {
-        eprintln!("Cannot create dir /tmp/rtx : {}", e);
-        std::process::exit(1);
-    });
     // 用 watch channel 传递进程状态
     let (tx, rx) = watch::channel(ChannelMessage {
         task_id: None,

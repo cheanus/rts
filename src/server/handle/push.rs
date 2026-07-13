@@ -4,17 +4,22 @@ use crate::server::state::{ChannelMessage, TaskAction};
 use crate::server::state::{ServerState, Task, TaskId, TaskStatus};
 use axum::Json;
 use axum::extract::State;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 pub async fn push_task(
     State(state): State<Arc<ServerState>>,
     Json(request): Json<PushTaskRequest>,
 ) -> Result<(), ServerError> {
+    let path = match request.path {
+        Some(p) => Some(PathBuf::from(p)),
+        None => None,
+    };
     let task = Task {
         label: request.label,
         status: TaskStatus::Pending,
         command: request.command,
-        path: None,
+        path,
     };
     let mut task_id_counter = state.task_id_counter.lock().await;
     state.tasks.lock().await.insert(*task_id_counter, task);
@@ -33,8 +38,9 @@ pub async fn push_task(
 mod tests {
     use super::*;
     use crate::server::state::{ChannelMessage, TaskAction};
-    use std::collections::HashMap;
     use std::error::Error;
+    use std::str::FromStr;
+    use std::{collections::HashMap, path::PathBuf};
     use tokio::sync::{Mutex, watch};
 
     #[tokio::test]
@@ -56,6 +62,7 @@ mod tests {
             Json(PushTaskRequest {
                 label: Some("test".to_string()),
                 command: "echo hi".to_string(),
+                path: Some("/tmp/rtx/test_push".to_string()),
             }),
         )
         .await?;
@@ -66,7 +73,7 @@ mod tests {
                 label: Some("test".to_string()),
                 status: TaskStatus::Pending,
                 command: "echo hi".to_string(),
-                path: None,
+                path: Some(PathBuf::from_str("/tmp/rtx/test_push")?),
             })
         );
 

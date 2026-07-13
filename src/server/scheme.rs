@@ -5,6 +5,7 @@ use std::collections::HashMap;
 pub struct PushTaskRequest {
     pub label: Option<String>,
     pub command: String,
+    pub path: Option<String>,
 }
 
 #[derive(serde::Deserialize)]

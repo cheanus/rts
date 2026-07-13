@@ -19,6 +19,9 @@ pub enum Commands {
         /// Optional label for the command
         #[arg(short, long)]
         label: Option<String>,
+        /// Optional log path
+        #[arg(short, long)]
+        path: Option<String>,
         /// The command to execute
         #[arg(required = true, allow_hyphen_values = true)]
         command: Vec<String>,

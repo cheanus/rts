@@ -10,7 +10,11 @@ async fn main() {
         cli::args::Commands::Server => {
             server::server(rts::get_server_host()).await;
         }
-        cli::args::Commands::Run { command, label } => rts::push_task(command.join(" "), label)
+        cli::args::Commands::Run {
+            label,
+            path,
+            command,
+        } => rts::push_task(label, path, command.join(" "))
             .await
             .unwrap_or_else(|e| eprintln!("Error pushing task: {}", e)),
         cli::args::Commands::List => rts::list_tasks()
