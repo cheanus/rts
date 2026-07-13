@@ -219,7 +219,9 @@ mod tests {
             ],
         )
         .await;
-        // todo:检查日志文件内容
+        // 检查日志文件内容
+        assert_eq!(fs::read_to_string("/tmp/rtx/test_worker_0")?, "Hi task 0\n");
+        assert_eq!(fs::read_to_string("/tmp/rtx/test_worker_1")?, "Hi task 1\n");
         Ok(())
     }
 }
