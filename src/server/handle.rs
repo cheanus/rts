@@ -24,16 +24,17 @@ pub async fn push_task(
     State(state): State<Arc<ServerState>>,
     Json(request): Json<PushTaskRequest>,
 ) -> Result<(), ServerError> {
-    let mut task_id_counter = state.task_id_counter.lock().await;
     let task = Task {
-        id: *task_id_counter,
         label: request.label,
         status: TaskStatus::Pending,
         command: request.command,
         path: None,
     };
+    let mut task_id_counter = state.task_id_counter.lock().await;
+    state.tasks.lock().await.insert(*task_id_counter, task);
+
     *task_id_counter += 1;
-    state.tasks.lock().await.push(task);
+
     let tx = state.tx.lock().await;
     tx.send(ChannelMessage {
         task_id: Some(TaskId::New),

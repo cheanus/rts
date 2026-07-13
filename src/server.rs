@@ -8,6 +8,7 @@ use axum::{Router, routing::get, routing::post};
 use state::{ChannelMessage, ServerState, TaskAction};
 use std::fs;
 use std::sync::Arc;
+use std::collections::HashMap;
 use tokio::net::TcpListener;
 use tokio::sync::{Mutex, watch};
 
@@ -27,7 +28,7 @@ pub async fn server(server_host: String) {
         num_slots: Mutex::new(1),
         used_slots: Mutex::new(0),
         task_id_counter: Mutex::new(0),
-        tasks: Mutex::new(Vec::new()),
+        tasks: Mutex::new(HashMap::new()),
         tx: Mutex::new(tx.clone()),
     });
 

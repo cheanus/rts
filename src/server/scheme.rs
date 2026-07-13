@@ -1,4 +1,5 @@
 use super::state::Task;
+use std::collections::HashMap;
 
 #[derive(serde::Deserialize)]
 pub struct PushTaskRequest {
@@ -15,5 +16,5 @@ pub struct ConfigureRequest {
 pub struct ListTaskResponse {
     pub num_slots: u32,
     pub used_slots: u32,
-    pub tasks: Vec<Task>,
+    pub tasks: HashMap<u32, Task>,
 }

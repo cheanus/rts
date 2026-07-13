@@ -1,5 +1,6 @@
 use super::state::{ChannelMessage, ServerState, Task, TaskAction, TaskStatus};
 use crate::server::state::TaskId;
+use std::collections::HashMap;
 use std::error::Error;
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -48,10 +49,10 @@ fn create_task(
 async fn try_create_tasks(
     mut used_slots: MutexGuard<'_, u32>,
     num_slots: u32,
-    mut tasks: MutexGuard<'_, Vec<Task>>,
+    mut tasks: MutexGuard<'_, HashMap<u32, Task>>,
     tx: &Sender<ChannelMessage>,
 ) {
-    for task in tasks.iter_mut() {
+    for (task_id, task) in tasks.iter_mut() {
         // 槽位满则 break
         if *used_slots >= num_slots {
             break;
@@ -59,9 +60,9 @@ async fn try_create_tasks(
         if task.status == TaskStatus::Pending {
             *used_slots += 1;
             task.status = TaskStatus::Running;
-            match create_task(task.id, &task.command, tx.clone()) {
+            match create_task(*task_id, &task.command, tx.clone()) {
                 Ok(log_path) => task.path = Some(log_path),
-                Err(_) => send_task_action(tx.clone(), task.id, TaskAction::Fail),
+                Err(_) => send_task_action(tx.clone(), *task_id, TaskAction::Fail),
             }
         }
     }
@@ -94,23 +95,22 @@ pub async fn rx_worker(
             }
             TaskId::Old(task_id) => {
                 // 更新结束或失败任务的状态
-                for task in tasks.iter_mut() {
-                    if task.id == task_id {
-                        match task_action {
-                            TaskAction::Complete => {
-                                task.status = TaskStatus::Completed;
-                                *used_slots -= 1;
-                            }
-                            TaskAction::Fail => {
-                                task.status = TaskStatus::Failed;
-                                *used_slots -= 1;
-                            }
-                            _ => {}
-                        }
-                        try_create_tasks(used_slots, num_slots, tasks, &tx).await;
-                        break;
+                let Some((_, task)) = tasks.iter_mut().find(|(i, _)| **i == task_id) else {
+                    eprintln!("Cannot find task with ID {}", task_id);
+                    continue;
+                };
+                match task_action {
+                    TaskAction::Complete => {
+                        task.status = TaskStatus::Completed;
+                        *used_slots -= 1;
                     }
+                    TaskAction::Fail => {
+                        task.status = TaskStatus::Failed;
+                        *used_slots -= 1;
+                    }
+                    _ => {}
                 }
+                try_create_tasks(used_slots, num_slots, tasks, &tx).await;
             }
         }
     }

@@ -28,10 +28,10 @@ pub async fn list_tasks() -> Result<(), Box<dyn Error>> {
         "ID\tLabel\tOutput\tStatus\tCommand ({}/{})",
         used_slots, num_slots
     );
-    for task in tasks {
+    for (task_id, task) in tasks {
         println!(
             "{}\t{}\t{}\t{:?}\t{}",
-            task.id,
+            task_id,
             task.label.as_deref().unwrap_or(""),
             task.path.unwrap_or(PathBuf::from("")).display(),
             task.status,
