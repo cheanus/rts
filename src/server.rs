@@ -6,7 +6,7 @@ mod workers;
 
 use axum::{Router, routing::get, routing::post};
 use state::{ChannelMessage, ServerState, TaskAction};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::{Mutex, watch};
@@ -22,7 +22,7 @@ pub async fn server(server_host: String) {
         num_slots: Mutex::new(1),
         used_slots: Mutex::new(0),
         task_id_counter: Mutex::new(0),
-        tasks: Mutex::new(HashMap::new()),
+        tasks: Mutex::new(BTreeMap::new()),
         tx: Mutex::new(tx.clone()),
     });
 

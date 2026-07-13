@@ -32,7 +32,7 @@ pub async fn configure(
 mod tests {
     use super::*;
     use crate::server::state::{ChannelMessage, TaskAction};
-    use std::collections::HashMap;
+    use std::collections::BTreeMap;
     use std::error::Error;
     use tokio::sync::{Mutex, watch};
 
@@ -46,7 +46,7 @@ mod tests {
             num_slots: Mutex::new(1),
             used_slots: Mutex::new(1),
             task_id_counter: Mutex::new(4),
-            tasks: Mutex::new(HashMap::new()),
+            tasks: Mutex::new(BTreeMap::new()),
             tx: Mutex::new(tx),
         });
         let request = ConfigureRequest { num_slots: 2 };

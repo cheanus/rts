@@ -1,6 +1,6 @@
 use super::state::{ChannelMessage, ServerState, Task, TaskAction, TaskStatus};
 use crate::server::state::TaskId;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::error::Error;
 use std::fs::{self, File};
 use std::path::PathBuf;
@@ -83,7 +83,7 @@ fn create_task(
 async fn try_create_tasks(
     mut used_slots: MutexGuard<'_, u32>,
     num_slots: u32,
-    mut tasks: MutexGuard<'_, HashMap<u32, Task>>,
+    mut tasks: MutexGuard<'_, BTreeMap<u32, Task>>,
     tx: &Sender<ChannelMessage>,
 ) {
     for (task_id, task) in tasks.iter_mut() {
@@ -160,14 +160,14 @@ mod tests {
     use tokio::time;
 
     async fn is_tasks_status_eq(state: Arc<ServerState>, true_state: [(u32, TaskStatus); 3]) {
-        let status_list: HashMap<u32, TaskStatus> = state
+        let status_list: BTreeMap<u32, TaskStatus> = state
             .tasks
             .lock()
             .await
             .iter()
             .map(|(id, task)| (*id, task.status))
             .collect();
-        assert_eq!(status_list, HashMap::from(true_state));
+        assert_eq!(status_list, BTreeMap::from(true_state));
     }
 
     #[tokio::test]
@@ -178,7 +178,7 @@ mod tests {
             task_action: TaskAction::Complete,
         });
         // 创建示例任务
-        let mut tasks = HashMap::new();
+        let mut tasks = BTreeMap::new();
         for task_id in 0..3 {
             tasks.insert(
                 task_id,

@@ -25,7 +25,7 @@ mod tests {
     use crate::server::state::{ChannelMessage, Task, TaskAction, TaskStatus};
     use axum::extract;
     use std::error::Error;
-    use std::{collections::HashMap, path::PathBuf};
+    use std::{collections::BTreeMap, path::PathBuf};
     use tokio::sync::{Mutex, watch};
 
     #[tokio::test]
@@ -34,7 +34,7 @@ mod tests {
             task_id: None,
             task_action: TaskAction::Complete,
         });
-        let mut tasks = HashMap::new();
+        let mut tasks = BTreeMap::new();
         tasks.insert(
             1,
             Task {

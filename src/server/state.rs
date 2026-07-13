@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use tokio::sync::{Mutex, watch::Sender};
 
@@ -6,7 +6,7 @@ pub struct ServerState {
     pub num_slots: Mutex<u32>,
     pub used_slots: Mutex<u32>,
     pub task_id_counter: Mutex<u32>,
-    pub tasks: Mutex<HashMap<u32, Task>>,
+    pub tasks: Mutex<BTreeMap<u32, Task>>,
     pub tx: Mutex<Sender<ChannelMessage>>,
 }
 

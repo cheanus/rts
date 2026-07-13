@@ -1,5 +1,5 @@
 use super::state::Task;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 #[derive(serde::Deserialize)]
 pub struct PushTaskRequest {
@@ -17,5 +17,5 @@ pub struct ConfigureRequest {
 pub struct ListTaskResponse {
     pub num_slots: u32,
     pub used_slots: u32,
-    pub tasks: HashMap<u32, Task>,
+    pub tasks: BTreeMap<u32, Task>,
 }

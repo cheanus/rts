@@ -22,6 +22,7 @@ pub async fn push_task(
         path,
     };
     let mut task_id_counter = state.task_id_counter.lock().await;
+    // 由于 state.tasks 是 BTreeMap，所以各 task 是按创建时间排序的
     state.tasks.lock().await.insert(*task_id_counter, task);
 
     *task_id_counter += 1;
@@ -40,7 +41,7 @@ mod tests {
     use crate::server::state::{ChannelMessage, TaskAction};
     use std::error::Error;
     use std::str::FromStr;
-    use std::{collections::HashMap, path::PathBuf};
+    use std::{collections::BTreeMap, path::PathBuf};
     use tokio::sync::{Mutex, watch};
 
     #[tokio::test]
@@ -53,7 +54,7 @@ mod tests {
             num_slots: Mutex::new(1),
             used_slots: Mutex::new(1),
             task_id_counter: Mutex::new(4),
-            tasks: Mutex::new(HashMap::new()),
+            tasks: Mutex::new(BTreeMap::new()),
             tx: Mutex::new(tx),
         });
 
