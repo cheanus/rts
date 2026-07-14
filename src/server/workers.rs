@@ -14,7 +14,7 @@ use tokio::sync::{
     watch::{Receiver, Sender},
 };
 
-fn send_task_action(tx: Sender<ChannelMessage>, task_id: u32, task_action: TaskAction) {
+fn send_task_action(tx: &Sender<ChannelMessage>, task_id: u32, task_action: TaskAction) {
     tx.send(ChannelMessage {
         task_id: Some(TaskId::Old(task_id)),
         task_action,
@@ -51,7 +51,7 @@ fn create_task(
                     Ok(s) if s.success() => TaskAction::Complete,
                     _ => TaskAction::Fail,
                 };
-                send_task_action(tx, task_id, task_action);
+                send_task_action(&tx, task_id, task_action);
             });
             Ok(None)
         }
@@ -73,7 +73,7 @@ fn create_task(
                     Ok(s) if s.success() => TaskAction::Complete,
                     _ => TaskAction::Fail,
                 };
-                send_task_action(tx, task_id, task_action);
+                send_task_action(&tx, task_id, task_action);
             });
             let (_file, persistent_path) = log.keep()?;
             Ok(Some(persistent_path))
@@ -110,13 +110,12 @@ async fn try_create_task(
         match create_task(task_id, &task.command, &task.path, tx.clone()) {
             Ok(Some(log_path)) => task.path = Some(log_path),
             Ok(None) => (),
-            Err(_) => send_task_action(tx.clone(), task_id, TaskAction::Fail),
+            Err(_) => send_task_action(tx, task_id, TaskAction::Fail),
         }
     }
 }
 
 pub async fn rx_worker(
-    tx: Sender<ChannelMessage>,
     mut rx: Receiver<ChannelMessage>,
     state: Arc<ServerState>,
 ) -> Result<(), std::io::Error> {
@@ -133,11 +132,12 @@ pub async fn rx_worker(
         let mut tasks = state.tasks.lock().await;
         let num_slots = *state.num_slots.lock().await;
         let mut used_slots = state.used_slots.lock().await;
+        let tx = &state.tx;
         match task_id {
             TaskId::New => {
                 // 尝试添加、运行新任务
                 if task_action == TaskAction::Run {
-                    try_create_tasks(used_slots, num_slots, tasks, &tx).await;
+                    try_create_tasks(used_slots, num_slots, tasks, tx).await;
                 }
             }
             TaskId::Old(task_id) => {
@@ -150,15 +150,15 @@ pub async fn rx_worker(
                     TaskAction::Complete => {
                         task.status = TaskStatus::Completed;
                         *used_slots -= 1;
-                        try_create_tasks(used_slots, num_slots, tasks, &tx).await;
+                        try_create_tasks(used_slots, num_slots, tasks, tx).await;
                     }
                     TaskAction::Fail => {
                         task.status = TaskStatus::Failed;
                         *used_slots -= 1;
-                        try_create_tasks(used_slots, num_slots, tasks, &tx).await;
+                        try_create_tasks(used_slots, num_slots, tasks, tx).await;
                     }
                     TaskAction::Run => {
-                        try_create_task(&mut used_slots, num_slots, task_id, task, &tx).await
+                        try_create_task(&mut used_slots, num_slots, task_id, task, tx).await
                     }
                 }
             }
@@ -210,12 +210,11 @@ mod tests {
             used_slots: Mutex::new(0),
             task_id_counter: Mutex::new(3),
             tasks: Mutex::new(tasks),
-            tx: Mutex::new(tx.clone()),
+            tx: tx.clone(),
         });
-        let tx_clone = tx.clone();
         let state_clone = Arc::clone(&state);
         // 运行 rx_worker 线程
-        tokio::spawn(async move { rx_worker(tx_clone, rx, state_clone).await });
+        tokio::spawn(async move { rx_worker(rx, state_clone).await });
 
         // 发送单任务信号
         tx.send(ChannelMessage {

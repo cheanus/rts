@@ -23,11 +23,11 @@ pub async fn server(server_host: String) {
         used_slots: Mutex::new(0),
         task_id_counter: Mutex::new(0),
         tasks: Mutex::new(BTreeMap::new()),
-        tx: Mutex::new(tx.clone()),
+        tx: tx,
     });
 
     // 创建 rx 处理线程
-    let rx_worker_fut = workers::rx_worker(tx, rx, Arc::clone(&state));
+    let rx_worker_fut = workers::rx_worker(rx, Arc::clone(&state));
 
     let app = Router::new()
         .route("/health", get(|| async { "Hello, World!" }))

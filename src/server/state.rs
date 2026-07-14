@@ -8,7 +8,7 @@ pub struct ServerState {
     pub used_slots: Mutex<u32>,
     pub task_id_counter: Mutex<u32>,
     pub tasks: Mutex<BTreeMap<u32, Task>>,
-    pub tx: Mutex<Sender<ChannelMessage>>,
+    pub tx: Sender<ChannelMessage>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

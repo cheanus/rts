@@ -28,7 +28,7 @@ pub async fn push_task(
 
     *task_id_counter += 1;
 
-    let tx = state.tx.lock().await;
+    let tx = &state.tx;
     tx.send(ChannelMessage {
         task_id: Some(TaskId::New),
         task_action: TaskAction::Run,
@@ -56,7 +56,7 @@ mod tests {
             used_slots: Mutex::new(1),
             task_id_counter: Mutex::new(4),
             tasks: Mutex::new(BTreeMap::new()),
-            tx: Mutex::new(tx),
+            tx,
         });
 
         push_task(

@@ -15,7 +15,7 @@ pub async fn configure(
     if *old_num_slots < num_slots {
         // 有新槽位则检查新任务
         *old_num_slots = num_slots;
-        let tx = state.tx.lock().await;
+        let tx = &state.tx;
         tx.send(ChannelMessage {
             task_id: Some(TaskId::New),
             task_action: TaskAction::Run,
@@ -47,11 +47,11 @@ mod tests {
             used_slots: Mutex::new(1),
             task_id_counter: Mutex::new(4),
             tasks: Mutex::new(BTreeMap::new()),
-            tx: Mutex::new(tx),
+            tx,
         });
         let request = ConfigureRequest { num_slots: 2 };
         configure(State(Arc::clone(&state)), Json(request)).await?;
-        assert_eq!(state.num_slots.lock().await.clone(), 2);
+        assert_eq!(*state.num_slots.lock().await, 2);
         rx.changed().await?; // 等待 rx 收信
         let message = rx.borrow();
         assert_eq!(

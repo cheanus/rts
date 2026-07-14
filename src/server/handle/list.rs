@@ -58,7 +58,7 @@ mod tests {
             used_slots: Mutex::new(1),
             task_id_counter: Mutex::new(4),
             tasks: Mutex::new(tasks.clone()),
-            tx: Mutex::new(tx),
+            tx,
         });
         let extract::Json(result) = list_tasks(State(state)).await?;
         assert_eq!(result.num_slots, 1);
