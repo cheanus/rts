@@ -1,5 +1,6 @@
 use super::state::{ChannelMessage, ServerState, Task, TaskAction, TaskStatus};
 use crate::server::state::TaskId;
+use chrono::Local;
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::fs::{self, File};
@@ -87,18 +88,29 @@ async fn try_create_tasks(
     tx: &Sender<ChannelMessage>,
 ) {
     for (task_id, task) in tasks.iter_mut() {
-        // 槽位满则 break
-        if *used_slots >= num_slots {
-            break;
-        }
-        if task.status == TaskStatus::Pending {
-            *used_slots += 1;
-            task.status = TaskStatus::Running;
-            match create_task(*task_id, &task.command, &task.path, tx.clone()) {
-                Ok(Some(log_path)) => task.path = Some(log_path),
-                Ok(None) => (),
-                Err(_) => send_task_action(tx.clone(), *task_id, TaskAction::Fail),
-            }
+        try_create_task(&mut used_slots, num_slots, *task_id, task, tx).await;
+    }
+}
+
+async fn try_create_task(
+    used_slots: &mut MutexGuard<'_, u32>,
+    num_slots: u32,
+    task_id: u32,
+    task: &mut Task,
+    tx: &Sender<ChannelMessage>,
+) {
+    // 槽位满则 break
+    if **used_slots >= num_slots {
+        return;
+    }
+    if task.status == TaskStatus::Pending {
+        **used_slots += 1;
+        task.status = TaskStatus::Running;
+        task.start_time = Some(Local::now());
+        match create_task(task_id, &task.command, &task.path, tx.clone()) {
+            Ok(Some(log_path)) => task.path = Some(log_path),
+            Ok(None) => (),
+            Err(_) => send_task_action(tx.clone(), task_id, TaskAction::Fail),
         }
     }
 }
@@ -138,14 +150,17 @@ pub async fn rx_worker(
                     TaskAction::Complete => {
                         task.status = TaskStatus::Completed;
                         *used_slots -= 1;
+                        try_create_tasks(used_slots, num_slots, tasks, &tx).await;
                     }
                     TaskAction::Fail => {
                         task.status = TaskStatus::Failed;
                         *used_slots -= 1;
+                        try_create_tasks(used_slots, num_slots, tasks, &tx).await;
                     }
-                    _ => {}
+                    TaskAction::Run => {
+                        try_create_task(&mut used_slots, num_slots, task_id, task, &tx).await
+                    }
                 }
-                try_create_tasks(used_slots, num_slots, tasks, &tx).await;
             }
         }
     }
@@ -159,7 +174,7 @@ mod tests {
     use tokio::sync::{Mutex, watch};
     use tokio::time;
 
-    async fn is_tasks_status_eq(state: Arc<ServerState>, true_state: [(u32, TaskStatus); 3]) {
+    async fn is_tasks_status_eq(state: &Arc<ServerState>, true_state: [(u32, TaskStatus); 3]) {
         let status_list: BTreeMap<u32, TaskStatus> = state
             .tasks
             .lock()
@@ -202,7 +217,24 @@ mod tests {
         // 运行 rx_worker 线程
         tokio::spawn(async move { rx_worker(tx_clone, rx, state_clone).await });
 
-        // 发送新任务信号
+        // 发送单任务信号
+        tx.send(ChannelMessage {
+            task_id: Some(TaskId::Old(0)),
+            task_action: TaskAction::Run,
+        })?;
+        time::sleep(Duration::from_millis(100)).await;
+        // 检查任务状态
+        is_tasks_status_eq(
+            &state,
+            [
+                (0, TaskStatus::Running),
+                (1, TaskStatus::Pending),
+                (2, TaskStatus::Pending),
+            ],
+        )
+        .await;
+
+        // 发送多任务信号
         tx.send(ChannelMessage {
             task_id: Some(TaskId::New),
             task_action: TaskAction::Run,
@@ -210,7 +242,7 @@ mod tests {
         time::sleep(Duration::from_millis(100)).await;
         // 检查任务状态
         is_tasks_status_eq(
-            state,
+            &state,
             [
                 (0, TaskStatus::Running),
                 (1, TaskStatus::Running),
