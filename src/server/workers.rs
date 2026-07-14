@@ -27,6 +27,11 @@ fn create_task(
     log_path: &Option<PathBuf>,
     tx: Sender<ChannelMessage>,
 ) -> Result<Option<PathBuf>, Box<dyn Error>> {
+    // 创建 /tmp/rtx/ 临时目录
+    fs::create_dir_all("/tmp/rtx").unwrap_or_else(|e| {
+        eprintln!("Cannot create dir /tmp/rtx : {}", e);
+        std::process::exit(1);
+    });
     match log_path {
         // 有 log_path 则用作日志文件
         Some(log_path) => {
@@ -51,11 +56,6 @@ fn create_task(
         }
         // 没 log_path 则创建临时日志文件
         None => {
-            // 创建 /tmp/rtx/ 临时目录
-            fs::create_dir_all("/tmp/rtx").unwrap_or_else(|e| {
-                eprintln!("Cannot create dir /tmp/rtx : {}", e);
-                std::process::exit(1);
-            });
             // 创建临时文件
             let log = NamedTempFile::new_in("/tmp/rtx")?;
 
