@@ -8,19 +8,19 @@ async fn main() {
 
     match args.command {
         cli::args::Commands::Server => {
-            server::server(rts::get_server_host()).await;
+            server::server(cli::get_server_host()).await;
         }
         cli::args::Commands::Run {
             label,
             path,
             command,
-        } => rts::push_task(label, path, command.join(" "))
+        } => cli::push_task(label, path, command.join(" "))
             .await
             .unwrap_or_else(|e| eprintln!("Error pushing task: {}", e)),
-        cli::args::Commands::List => rts::list_tasks()
+        cli::args::Commands::List => cli::list_tasks()
             .await
             .unwrap_or_else(|e| eprintln!("Error listing tasks: {}", e)),
-        cli::args::Commands::Config { num_slots } => rts::configure(num_slots)
+        cli::args::Commands::Config { num_slots } => cli::configure(num_slots)
             .await
             .unwrap_or_else(|e| eprintln!("Error configure: {}", e)),
     }
