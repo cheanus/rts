@@ -6,10 +6,9 @@ mod workers;
 
 use axum::{Router, routing::get, routing::post};
 use state::{ChannelMessage, ServerState, TaskAction};
-use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::net::TcpListener;
-use tokio::sync::{Mutex, watch};
+use tokio::sync::watch;
 
 pub async fn server(server_host: String) {
     // 用 watch channel 传递进程状态
@@ -18,16 +17,10 @@ pub async fn server(server_host: String) {
         task_action: TaskAction::Complete,
     });
 
-    let state = Arc::new(ServerState {
-        num_slots: Mutex::new(1),
-        used_slots: Mutex::new(0),
-        task_id_counter: Mutex::new(0),
-        tasks: Mutex::new(BTreeMap::new()),
-        tx: tx,
-    });
+    let state = Arc::new(ServerState::new(1, tx.clone()));
 
     // 创建 rx 处理线程
-    let rx_worker_fut = workers::rx_worker(rx, Arc::clone(&state));
+    let rx_worker_fut = workers::rx_worker(tx, rx, Arc::clone(&state));
 
     let app = Router::new()
         .route("/health", get(|| async { "Hello, World!" }))

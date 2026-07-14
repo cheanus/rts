@@ -1,3 +1,4 @@
+use super::errors::ServerError;
 use chrono::{DateTime, Local};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -6,9 +7,53 @@ use tokio::sync::{Mutex, watch::Sender};
 pub struct ServerState {
     pub num_slots: Mutex<u32>,
     pub used_slots: Mutex<u32>,
-    pub task_id_counter: Mutex<u32>,
     pub tasks: Mutex<BTreeMap<u32, Task>>,
-    pub tx: Sender<ChannelMessage>,
+    task_id_counter: Mutex<u32>,
+    tx: Sender<ChannelMessage>,
+}
+
+impl ServerState {
+    pub fn new(num_slots: u32, tx: Sender<ChannelMessage>) -> Self {
+        ServerState {
+            num_slots: Mutex::new(num_slots),
+            used_slots: Mutex::new(0),
+            task_id_counter: Mutex::new(0),
+            tasks: Mutex::new(BTreeMap::new()),
+            tx: tx,
+        }
+    }
+
+    pub async fn set_num_slots(&self, num_slots: u32) -> Result<(), ServerError> {
+        let mut old_num_slots = self.num_slots.lock().await;
+        if *old_num_slots < num_slots {
+            // 有新槽位则检查新任务
+            *old_num_slots = num_slots;
+            let tx = &self.tx;
+            tx.send(ChannelMessage {
+                task_id: Some(TaskId::New),
+                task_action: TaskAction::Run,
+            })
+            .map_err(|e| ServerError::InternalError(e.to_string()))?;
+        } else {
+            *old_num_slots = num_slots;
+        }
+        Ok(())
+    }
+
+    pub async fn push_task(&self, task: Task) -> Result<(), ServerError> {
+        let mut task_id_counter = self.task_id_counter.lock().await;
+        // 由于 state.tasks 是 BTreeMap，所以各 task 默认是按创建时间排序的
+        self.tasks.lock().await.insert(*task_id_counter, task);
+
+        *task_id_counter += 1;
+
+        let tx = &self.tx;
+        tx.send(ChannelMessage {
+            task_id: Some(TaskId::New),
+            task_action: TaskAction::Run,
+        })
+        .map_err(|e| ServerError::InternalError(e.to_string()))
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

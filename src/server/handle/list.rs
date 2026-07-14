@@ -26,17 +26,20 @@ mod tests {
     use axum::extract;
     use std::error::Error;
     use std::{collections::BTreeMap, path::PathBuf};
-    use tokio::sync::{Mutex, watch};
+    use tokio::sync::watch;
 
     #[tokio::test]
     async fn test_list_tasks() -> Result<(), Box<dyn Error>> {
-        let (tx, _) = watch::channel(ChannelMessage {
+        // 初始化
+        let (tx, _rx) = watch::channel(ChannelMessage {
             task_id: None,
             task_action: TaskAction::Complete,
         });
+        let state = Arc::new(ServerState::new(1, tx));
+        // 创建测试样本
         let mut tasks = BTreeMap::new();
         tasks.insert(
-            1,
+            0,
             Task {
                 status: TaskStatus::Running,
                 command: "echo hi".into(),
@@ -45,7 +48,7 @@ mod tests {
             },
         );
         tasks.insert(
-            3,
+            1,
             Task {
                 label: Some("higher".to_string()),
                 status: TaskStatus::Pending,
@@ -53,16 +56,12 @@ mod tests {
                 ..Default::default()
             },
         );
-        let state = Arc::new(ServerState {
-            num_slots: Mutex::new(1),
-            used_slots: Mutex::new(1),
-            task_id_counter: Mutex::new(4),
-            tasks: Mutex::new(tasks.clone()),
-            tx,
-        });
-        let extract::Json(result) = list_tasks(State(state)).await?;
+        *state.tasks.lock().await = tasks.clone();
+        // 调用结果
+        let extract::Json(result) = list_tasks(State(Arc::clone(&state))).await?;
+
         assert_eq!(result.num_slots, 1);
-        assert_eq!(result.used_slots, 1);
+        assert_eq!(result.used_slots, 0);
         assert_eq!(result.tasks, tasks);
         Ok(())
     }

@@ -116,6 +116,7 @@ async fn try_create_task(
 }
 
 pub async fn rx_worker(
+    tx: Sender<ChannelMessage>,
     mut rx: Receiver<ChannelMessage>,
     state: Arc<ServerState>,
 ) -> Result<(), std::io::Error> {
@@ -132,12 +133,11 @@ pub async fn rx_worker(
         let mut tasks = state.tasks.lock().await;
         let num_slots = *state.num_slots.lock().await;
         let mut used_slots = state.used_slots.lock().await;
-        let tx = &state.tx;
         match task_id {
             TaskId::New => {
                 // 尝试添加、运行新任务
                 if task_action == TaskAction::Run {
-                    try_create_tasks(used_slots, num_slots, tasks, tx).await;
+                    try_create_tasks(used_slots, num_slots, tasks, &tx).await;
                 }
             }
             TaskId::Old(task_id) => {
@@ -150,15 +150,15 @@ pub async fn rx_worker(
                     TaskAction::Complete => {
                         task.status = TaskStatus::Completed;
                         *used_slots -= 1;
-                        try_create_tasks(used_slots, num_slots, tasks, tx).await;
+                        try_create_tasks(used_slots, num_slots, tasks, &tx).await;
                     }
                     TaskAction::Fail => {
                         task.status = TaskStatus::Failed;
                         *used_slots -= 1;
-                        try_create_tasks(used_slots, num_slots, tasks, tx).await;
+                        try_create_tasks(used_slots, num_slots, tasks, &tx).await;
                     }
                     TaskAction::Run => {
-                        try_create_task(&mut used_slots, num_slots, task_id, task, tx).await
+                        try_create_task(&mut used_slots, num_slots, task_id, task, &tx).await
                     }
                 }
             }
@@ -171,7 +171,7 @@ pub async fn rx_worker(
 mod tests {
     use super::*;
     use std::time::Duration;
-    use tokio::sync::{Mutex, watch};
+    use tokio::sync::watch;
     use tokio::time;
 
     async fn is_tasks_status_eq(state: &Arc<ServerState>, true_state: [(u32, TaskStatus); 3]) {
@@ -192,54 +192,28 @@ mod tests {
             task_id: None,
             task_action: TaskAction::Complete,
         });
+        // 创建全局 state
+        let server_state = ServerState::new(2, tx.clone());
+        let state = Arc::new(server_state);
+        let state_clone = Arc::clone(&state);
+
+        // 运行 rx_worker 线程
+        let tx_clone = tx.clone();
+        tokio::spawn(async move { rx_worker(tx_clone, rx, state_clone).await });
+
         // 创建示例任务
-        let mut tasks = BTreeMap::new();
         for task_id in 0..3 {
-            tasks.insert(
-                task_id,
-                Task {
+            state
+                .push_task(Task {
                     command: format!("echo Hi task {task_id} && sleep 3"),
                     path: Some(PathBuf::from(format!("/tmp/rtx/test_worker_{task_id}"))),
                     ..Default::default()
-                },
-            );
+                })
+                .await?;
         }
-        // 创建全局 state
-        let state = Arc::new(ServerState {
-            num_slots: Mutex::new(2),
-            used_slots: Mutex::new(0),
-            task_id_counter: Mutex::new(3),
-            tasks: Mutex::new(tasks),
-            tx: tx.clone(),
-        });
-        let state_clone = Arc::clone(&state);
-        // 运行 rx_worker 线程
-        tokio::spawn(async move { rx_worker(rx, state_clone).await });
 
-        // 发送单任务信号
-        tx.send(ChannelMessage {
-            task_id: Some(TaskId::Old(0)),
-            task_action: TaskAction::Run,
-        })?;
-        time::sleep(Duration::from_millis(100)).await;
         // 检查任务状态
-        is_tasks_status_eq(
-            &state,
-            [
-                (0, TaskStatus::Running),
-                (1, TaskStatus::Pending),
-                (2, TaskStatus::Pending),
-            ],
-        )
-        .await;
-
-        // 发送多任务信号
-        tx.send(ChannelMessage {
-            task_id: Some(TaskId::New),
-            task_action: TaskAction::Run,
-        })?;
         time::sleep(Duration::from_millis(100)).await;
-        // 检查任务状态
         is_tasks_status_eq(
             &state,
             [

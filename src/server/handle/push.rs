@@ -1,7 +1,6 @@
 use crate::server::errors::ServerError;
 use crate::server::scheme::PushTaskRequest;
-use crate::server::state::{ChannelMessage, TaskAction};
-use crate::server::state::{ServerState, Task, TaskId, TaskStatus};
+use crate::server::state::{ServerState, Task, TaskStatus};
 use axum::Json;
 use axum::extract::State;
 use std::path::PathBuf;
@@ -22,28 +21,17 @@ pub async fn push_task(
         path,
         ..Default::default()
     };
-    let mut task_id_counter = state.task_id_counter.lock().await;
-    // 由于 state.tasks 是 BTreeMap，所以各 task 是按创建时间排序的
-    state.tasks.lock().await.insert(*task_id_counter, task);
-
-    *task_id_counter += 1;
-
-    let tx = &state.tx;
-    tx.send(ChannelMessage {
-        task_id: Some(TaskId::New),
-        task_action: TaskAction::Run,
-    })
-    .map_err(|e| ServerError::InternalError(e.to_string()))
+    state.push_task(task).await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::server::state::{ChannelMessage, TaskAction};
+    use crate::server::state::{ChannelMessage, TaskAction, TaskId};
     use std::error::Error;
+    use std::path::PathBuf;
     use std::str::FromStr;
-    use std::{collections::BTreeMap, path::PathBuf};
-    use tokio::sync::{Mutex, watch};
+    use tokio::sync::watch;
 
     #[tokio::test]
     async fn test_push_task() -> Result<(), Box<dyn Error>> {
@@ -51,13 +39,7 @@ mod tests {
             task_id: None,
             task_action: TaskAction::Complete,
         });
-        let state = Arc::new(ServerState {
-            num_slots: Mutex::new(1),
-            used_slots: Mutex::new(1),
-            task_id_counter: Mutex::new(4),
-            tasks: Mutex::new(BTreeMap::new()),
-            tx,
-        });
+        let state = Arc::new(ServerState::new(1, tx));
 
         push_task(
             State(Arc::clone(&state)),
@@ -70,7 +52,7 @@ mod tests {
         .await?;
 
         assert_eq!(
-            state.tasks.lock().await.get(&4),
+            state.tasks.lock().await.get(&0),
             Some(&Task {
                 label: Some("test".to_string()),
                 status: TaskStatus::Pending,
