@@ -38,10 +38,10 @@ mod tests {
         tasks.insert(
             1,
             Task {
-                label: None,
                 status: TaskStatus::Running,
                 command: "echo hi".into(),
                 path: Some(PathBuf::from("/tmp/a")),
+                ..Default::default()
             },
         );
         tasks.insert(
@@ -50,7 +50,7 @@ mod tests {
                 label: Some("higher".to_string()),
                 status: TaskStatus::Pending,
                 command: "sleep 10".into(),
-                path: None,
+                ..Default::default()
             },
         );
         let state = Arc::new(ServerState {

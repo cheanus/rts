@@ -1,3 +1,4 @@
+use chrono::{DateTime, Local};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use tokio::sync::{Mutex, watch::Sender};
@@ -10,20 +11,25 @@ pub struct ServerState {
     pub tx: Mutex<Sender<ChannelMessage>>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Task {
     pub label: Option<String>,
     pub status: TaskStatus,
     pub command: String,
     pub path: Option<PathBuf>,
+    pub create_time: DateTime<Local>,
+    pub start_time: Option<DateTime<Local>>,
+    pub end_time: Option<DateTime<Local>>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum TaskStatus {
+    #[default]
     Pending,
     Running,
     Completed,
     Failed,
+    // Skipped,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -183,10 +183,9 @@ mod tests {
             tasks.insert(
                 task_id,
                 Task {
-                    label: None,
-                    status: TaskStatus::Pending,
                     command: format!("echo Hi task {task_id} && sleep 3"),
                     path: Some(PathBuf::from(format!("/tmp/rtx/test_worker_{task_id}"))),
+                    ..Default::default()
                 },
             );
         }

@@ -20,6 +20,7 @@ pub async fn push_task(
         status: TaskStatus::Pending,
         command: request.command,
         path,
+        ..Default::default()
     };
     let mut task_id_counter = state.task_id_counter.lock().await;
     // 由于 state.tasks 是 BTreeMap，所以各 task 是按创建时间排序的
@@ -75,6 +76,7 @@ mod tests {
                 status: TaskStatus::Pending,
                 command: "echo hi".to_string(),
                 path: Some(PathBuf::from_str("/tmp/rtx/test_push")?),
+                ..Default::default()
             })
         );
 
