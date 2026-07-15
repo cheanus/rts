@@ -1,6 +1,6 @@
 use super::errors::ServerError;
 use chrono::{DateTime, Local};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use tokio::sync::{Mutex, watch::Sender};
 
@@ -61,7 +61,9 @@ pub struct Task {
     pub label: Option<String>,
     pub status: TaskStatus,
     pub command: String,
-    pub path: Option<PathBuf>,
+    pub log_path: Option<PathBuf>,
+    pub current_dir: PathBuf,
+    pub envs: HashMap<String, String>,
     pub create_time: DateTime<Local>,
     pub start_time: Option<DateTime<Local>>,
     pub end_time: Option<DateTime<Local>>,

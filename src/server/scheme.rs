@@ -1,11 +1,16 @@
 use super::state::Task;
-use std::collections::BTreeMap;
+use std::{
+    collections::{BTreeMap, HashMap},
+    path::PathBuf,
+};
 
-#[derive(serde::Deserialize)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct PushTaskRequest {
     pub label: Option<String>,
     pub command: String,
-    pub path: Option<String>,
+    pub log_path: Option<PathBuf>,
+    pub current_dir: PathBuf,
+    pub envs: HashMap<String, String>,
 }
 
 #[derive(serde::Deserialize)]

@@ -1,7 +1,7 @@
 pub mod args;
 
 use super::cli::args::GetTaskMode;
-use super::server::scheme::ListTaskResponse;
+use super::server::scheme::{ListTaskResponse, PushTaskRequest};
 use super::server::state::Task;
 use rev_buf_reader::RevBufReader;
 use std::collections::HashMap;
@@ -37,7 +37,7 @@ pub async fn list_tasks() -> Result<(), Box<dyn Error>> {
             "{}\t{}\t{}\t{:?}\t{}",
             task_id,
             task.label.as_deref().unwrap_or(""),
-            task.path.unwrap_or(PathBuf::from("")).display(),
+            task.log_path.unwrap_or(PathBuf::from("")).display(),
             task.status,
             task.command
         )
@@ -60,7 +60,7 @@ pub async fn get_task_info(task_id: u32) -> Result<(), Box<dyn Error>> {
     println!("Label: {}", task.label.as_deref().unwrap_or(""));
     println!(
         "Log path: {}",
-        task.path.unwrap_or(PathBuf::from("")).display()
+        task.log_path.unwrap_or(PathBuf::from("")).display()
     );
     println!("Create time: {}", task.create_time);
     if let Some(start_time) = task.start_time {
@@ -86,7 +86,7 @@ pub async fn get_task_log(mode: GetTaskMode, task_id: u32) -> Result<(), Box<dyn
         .await?
         .json::<Task>()
         .await?;
-    if let Some(log_path) = task.path {
+    if let Some(log_path) = task.log_path {
         let file = fs::File::open(log_path)?;
         if mode.cat {
             // 逐行读取
@@ -120,14 +120,13 @@ pub async fn push_task(
     command: String,
 ) -> Result<(), Box<dyn Error>> {
     let server_host = get_server_host();
-    let mut data = HashMap::new();
-    data.insert("command", command);
-    if let Some(p) = path {
-        data.insert("path", p);
-    }
-    if let Some(l) = label {
-        data.insert("label", l);
-    }
+    let data = PushTaskRequest {
+        label,
+        command,
+        log_path: path.map(|p| PathBuf::from(p)),
+        current_dir: env::current_dir()?,
+        envs: env::vars().collect(),
+    };
     let client = reqwest::Client::new();
     client
         .post(format!("http://{server_host}/tasks/push"))

@@ -11,7 +11,7 @@ pub async fn push_task(
     State(state): State<Arc<ServerState>>,
     Json(request): Json<PushTaskRequest>,
 ) -> Result<(), ServerError> {
-    let path = match request.path {
+    let log_path = match request.log_path {
         Some(p) => Some(PathBuf::from(p)),
         None => None,
     };
@@ -19,7 +19,9 @@ pub async fn push_task(
         label: request.label,
         status: TaskStatus::Pending,
         command: request.command,
-        path,
+        log_path,
+        current_dir: PathBuf::from(request.current_dir),
+        envs: request.envs,
         create_time: Local::now(),
         ..Default::default()
     };
@@ -30,6 +32,7 @@ pub async fn push_task(
 mod tests {
     use super::*;
     use crate::server::state::{ChannelMessage, TaskAction, TaskId};
+    use std::collections::HashMap;
     use std::error::Error;
     use std::path::PathBuf;
     use std::str::FromStr;
@@ -43,21 +46,25 @@ mod tests {
         });
         let state = Arc::new(ServerState::new(1, tx));
         // 传送 task
-        push_task(
-            State(Arc::clone(&state)),
-            Json(PushTaskRequest {
-                label: Some("test".to_string()),
-                command: "echo hi".to_string(),
-                path: Some("/tmp/rtx/test_push".to_string()),
-            }),
-        )
-        .await?;
+        let request = PushTaskRequest {
+            label: Some("test".to_string()),
+            command: "echo hi".to_string(),
+            log_path: Some(PathBuf::from_str("/tmp/rtx/test_push")?),
+            current_dir: PathBuf::from_str("/")?,
+            envs: HashMap::from([("PYTHONPATH".to_string(), "/".to_string())]),
+        };
+        push_task(State(Arc::clone(&state)), Json(request.clone())).await?;
         // 检查字段
         let task0 = state.tasks.lock().await.get(&0).unwrap().clone();
-        assert_eq!(task0.label, Some("test".to_string()));
+        assert_eq!(task0.label, request.label);
         assert_eq!(task0.status, TaskStatus::Pending);
-        assert_eq!(task0.command, "echo hi".to_string());
-        assert_eq!(task0.path, Some(PathBuf::from_str("/tmp/rtx/test_push")?));
+        assert_eq!(task0.command, request.command);
+        assert_eq!(
+            task0.log_path,
+            Some(PathBuf::from_str("/tmp/rtx/test_push")?)
+        );
+        assert_eq!(task0.current_dir, request.current_dir);
+        assert_eq!(task0.envs, request.envs);
 
         rx.changed().await?; // 等待 rx 收信
         let message = *rx.borrow();

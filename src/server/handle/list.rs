@@ -42,7 +42,7 @@ mod tests {
             Task {
                 status: TaskStatus::Running,
                 command: "echo hi".into(),
-                path: Some(PathBuf::from("/tmp/a")),
+                log_path: Some(PathBuf::from("/tmp/a")),
                 ..Default::default()
             },
         );

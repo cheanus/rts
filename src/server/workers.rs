@@ -1,7 +1,7 @@
 use super::state::{ChannelMessage, ServerState, Task, TaskAction, TaskStatus};
 use crate::server::state::TaskId;
 use chrono::Local;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::error::Error;
 use std::fs::{self, File};
 use std::path::PathBuf;
@@ -26,6 +26,8 @@ fn create_task(
     task_id: u32,
     command: &str,
     log_path: &Option<PathBuf>,
+    current_dir: &PathBuf,
+    envs: &HashMap<String, String>,
     tx: Sender<ChannelMessage>,
 ) -> Result<Option<PathBuf>, Box<dyn Error>> {
     // 创建 /tmp/rtx/ 临时目录
@@ -41,6 +43,8 @@ fn create_task(
             let mut child = process::Command::new("sh")
                 .arg("-c")
                 .arg(command)
+                .current_dir(current_dir)
+                .envs(envs)
                 .stdout(Stdio::from(log.try_clone()?))
                 .stderr(Stdio::from(log))
                 .spawn()?;
@@ -63,6 +67,8 @@ fn create_task(
             let mut child = process::Command::new("sh")
                 .arg("-c")
                 .arg(command)
+                .current_dir(current_dir)
+                .envs(envs)
                 .stdout(Stdio::from(log.reopen()?))
                 .stderr(Stdio::from(log.reopen()?))
                 .spawn()?;
@@ -107,8 +113,15 @@ async fn try_create_task(
         **used_slots += 1;
         task.status = TaskStatus::Running;
         task.start_time = Some(Local::now());
-        match create_task(task_id, &task.command, &task.path, tx.clone()) {
-            Ok(Some(log_path)) => task.path = Some(log_path),
+        match create_task(
+            task_id,
+            &task.command,
+            &task.log_path,
+            &task.current_dir,
+            &task.envs,
+            tx.clone(),
+        ) {
+            Ok(Some(log_path)) => task.log_path = Some(log_path),
             Ok(None) => (),
             Err(_) => send_task_action(tx, task_id, TaskAction::Fail),
         }
@@ -172,6 +185,7 @@ pub async fn rx_worker(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::str::FromStr;
     use std::time::Duration;
     use tokio::sync::watch;
     use tokio::time;
@@ -201,7 +215,8 @@ mod tests {
             state
                 .push_task(Task {
                     command: format!("echo Hi task {task_id} && sleep 0.1"),
-                    path: Some(PathBuf::from(format!("/tmp/rtx/test_worker_{task_id}"))),
+                    log_path: Some(PathBuf::from(format!("/tmp/rtx/test_worker_{task_id}"))),
+                    current_dir: PathBuf::from_str("/")?,
                     ..Default::default()
                 })
                 .await?;
