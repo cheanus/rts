@@ -32,8 +32,11 @@ pub enum Commands {
 
     /// Get a task
     Get {
+        // Choose mode to get task
+        #[command(flatten)]
+        mode: Option<GetTaskMode>,
         /// The id of task to get
-        #[arg(short, long)]
+        #[arg(required = true)]
         id: u32,
     },
 
@@ -43,4 +46,15 @@ pub enum Commands {
         #[arg(short = 'S', default_value_t = 1)]
         num_slots: u32,
     },
+}
+
+#[derive(Debug, Parser)]
+#[group(multiple = false)]
+pub struct GetTaskMode {
+    /// Cat log
+    #[arg(short)]
+    pub cat: bool,
+    /// Tail log
+    #[arg(short)]
+    pub tail: bool,
 }

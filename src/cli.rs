@@ -1,10 +1,14 @@
 pub mod args;
 
+use super::cli::args::GetTaskMode;
 use super::server::scheme::ListTaskResponse;
 use super::server::state::Task;
+use rev_buf_reader::RevBufReader;
 use std::collections::HashMap;
 use std::env;
 use std::error::Error;
+use std::fs;
+use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 
 pub fn get_server_host() -> String {
@@ -68,6 +72,44 @@ pub async fn get_task_info(task_id: u32) -> Result<(), Box<dyn Error>> {
     if let (Some(start_time), Some(end_time)) = (task.start_time, task.end_time) {
         let elapse_time = end_time - start_time;
         println!("Elapse time: {}", elapse_time);
+    }
+    Ok(())
+}
+
+pub async fn get_task_log(mode: GetTaskMode, task_id: u32) -> Result<(), Box<dyn Error>> {
+    let server_host = get_server_host();
+    let client = reqwest::Client::new();
+    let task = client
+        .get(format!("http://{server_host}/tasks/info"))
+        .query(&[("task_id", task_id)])
+        .send()
+        .await?
+        .json::<Task>()
+        .await?;
+    if let Some(log_path) = task.path {
+        let file = fs::File::open(log_path)?;
+        if mode.cat {
+            // 逐行读取
+            let reader = BufReader::new(file);
+            for line in reader.lines() {
+                println!("{}", line?);
+            }
+        } else if mode.tail {
+            let reader = RevBufReader::new(file);
+            for line in reader
+                .lines()
+                .take(10)
+                .collect::<Result<Vec<_>, _>>()
+                .map(|mut v| {
+                    v.reverse();
+                    v
+                })?
+            {
+                println!("{}", line);
+            }
+        }
+    } else {
+        eprintln!("No log file");
     }
     Ok(())
 }
