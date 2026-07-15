@@ -9,6 +9,7 @@ use std::fmt;
 pub enum ServerError {
     InvalidJson(String),
     InternalError(String),
+    InvalidParams(String),
 }
 
 impl IntoResponse for ServerError {
@@ -22,6 +23,9 @@ impl IntoResponse for ServerError {
                 "INTERNAL_ERROR",
                 msg.as_str(),
             ),
+            ServerError::InvalidParams(ref msg) => {
+                (StatusCode::BAD_REQUEST, "INVALID_PARAMS", msg.as_str())
+            }
         };
 
         let body = json!({

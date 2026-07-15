@@ -91,7 +91,7 @@ pub enum TaskAction {
     Fail,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ChannelMessage {
     pub task_id: Option<TaskId>,
     pub task_action: TaskAction,

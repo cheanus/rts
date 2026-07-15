@@ -19,3 +19,8 @@ pub struct ListTaskResponse {
     pub used_slots: u32,
     pub tasks: BTreeMap<u32, Task>,
 }
+
+#[derive(serde::Deserialize)]
+pub struct TaskInfoRequest {
+    pub task_id: u32,
+}

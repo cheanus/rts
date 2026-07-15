@@ -1,6 +1,7 @@
 pub mod args;
 
 use super::server::scheme::ListTaskResponse;
+use super::server::state::Task;
 use std::collections::HashMap;
 use std::env;
 use std::error::Error;
@@ -36,6 +37,37 @@ pub async fn list_tasks() -> Result<(), Box<dyn Error>> {
             task.status,
             task.command
         )
+    }
+    Ok(())
+}
+
+pub async fn get_task_info(task_id: u32) -> Result<(), Box<dyn Error>> {
+    let server_host = get_server_host();
+    let client = reqwest::Client::new();
+    let task = client
+        .get(format!("http://{server_host}/tasks/info"))
+        .query(&[("task_id", task_id)])
+        .send()
+        .await?
+        .json::<Task>()
+        .await?;
+    println!("Status: {:?}", task.status);
+    println!("Command: {}", task.command);
+    println!("Label: {}", task.label.as_deref().unwrap_or(""));
+    println!(
+        "Log path: {}",
+        task.path.unwrap_or(PathBuf::from("")).display()
+    );
+    println!("Create time: {}", task.create_time);
+    if let Some(start_time) = task.start_time {
+        println!("Start time: {}", start_time);
+    }
+    if let Some(end_time) = task.end_time {
+        println!("End time: {}", end_time);
+    }
+    if let (Some(start_time), Some(end_time)) = (task.start_time, task.end_time) {
+        let elapse_time = end_time - start_time;
+        println!("Elapse time: {}", elapse_time);
     }
     Ok(())
 }

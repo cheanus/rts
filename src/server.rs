@@ -1,7 +1,7 @@
 mod errors;
 mod handle;
 pub mod scheme;
-mod state;
+pub mod state;
 mod workers;
 
 use axum::{Router, routing::get, routing::post};
@@ -24,6 +24,7 @@ pub async fn server(server_host: String) {
 
     let app = Router::new()
         .route("/health", get(|| async { "Hello, World!" }))
+        .route("/tasks/info", get(handle::get_task_info))
         .route("/tasks/list", get(handle::list_tasks))
         .route("/tasks/push", post(handle::push_task))
         .route("/configure", post(handle::configure))

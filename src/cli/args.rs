@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 
 /// Task orchestration
-#[derive(Parser, Debug)]
+#[derive(Parser)]
 #[command(version, about, long_about = None)]
 pub struct Args {
     #[command(subcommand)]
@@ -29,6 +29,13 @@ pub enum Commands {
 
     /// List tasks
     List,
+
+    /// Get a task
+    Get {
+        /// The id of task to get
+        #[arg(short, long)]
+        id: u32,
+    },
 
     /// Configure the RTS server
     Config {

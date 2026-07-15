@@ -149,11 +149,13 @@ pub async fn rx_worker(
                 match task_action {
                     TaskAction::Complete => {
                         task.status = TaskStatus::Completed;
+                        task.end_time = Some(Local::now());
                         *used_slots -= 1;
                         try_create_tasks(used_slots, num_slots, tasks, &tx).await;
                     }
                     TaskAction::Fail => {
                         task.status = TaskStatus::Failed;
+                        task.end_time = Some(Local::now());
                         *used_slots -= 1;
                         try_create_tasks(used_slots, num_slots, tasks, &tx).await;
                     }
@@ -174,15 +176,8 @@ mod tests {
     use tokio::sync::watch;
     use tokio::time;
 
-    async fn is_tasks_status_eq(state: &Arc<ServerState>, true_state: [(u32, TaskStatus); 3]) {
-        let status_list: BTreeMap<u32, TaskStatus> = state
-            .tasks
-            .lock()
-            .await
-            .iter()
-            .map(|(id, task)| (*id, task.status))
-            .collect();
-        assert_eq!(status_list, BTreeMap::from(true_state));
+    async fn get_tasks(state: Arc<ServerState>) -> BTreeMap<u32, Task> {
+        state.tasks.lock().await.clone()
     }
 
     #[tokio::test]
@@ -205,7 +200,7 @@ mod tests {
         for task_id in 0..3 {
             state
                 .push_task(Task {
-                    command: format!("echo Hi task {task_id} && sleep 3"),
+                    command: format!("echo Hi task {task_id} && sleep 0.1"),
                     path: Some(PathBuf::from(format!("/tmp/rtx/test_worker_{task_id}"))),
                     ..Default::default()
                 })
@@ -213,19 +208,21 @@ mod tests {
         }
 
         // 检查任务状态
-        time::sleep(Duration::from_millis(100)).await;
-        is_tasks_status_eq(
-            &state,
-            [
-                (0, TaskStatus::Running),
-                (1, TaskStatus::Running),
-                (2, TaskStatus::Pending),
-            ],
-        )
-        .await;
+        time::sleep(Duration::from_millis(50)).await;
+        let tasks_now = get_tasks(Arc::clone(&state)).await;
+        assert_eq!(tasks_now.get(&0).unwrap().status, TaskStatus::Running);
+        assert_eq!(tasks_now.get(&1).unwrap().status, TaskStatus::Running);
+        assert_eq!(tasks_now.get(&2).unwrap().status, TaskStatus::Pending);
         // 检查日志文件内容
         assert_eq!(fs::read_to_string("/tmp/rtx/test_worker_0")?, "Hi task 0\n");
         assert_eq!(fs::read_to_string("/tmp/rtx/test_worker_1")?, "Hi task 1\n");
+
+        time::sleep(Duration::from_millis(100)).await;
+        let tasks_now = get_tasks(Arc::clone(&state)).await;
+        // 检查结束时间
+        assert!(tasks_now.get(&0).unwrap().end_time.is_some());
+        assert!(tasks_now.get(&1).unwrap().end_time.is_some());
+
         Ok(())
     }
 }

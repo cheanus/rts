@@ -20,6 +20,9 @@ async fn main() {
         cli::args::Commands::List => cli::list_tasks()
             .await
             .unwrap_or_else(|e| eprintln!("Error listing tasks: {}", e)),
+        cli::args::Commands::Get { id } => cli::get_task_info(id)
+            .await
+            .unwrap_or_else(|e| eprintln!("Error get task with id {}: {}", id, e)),
         cli::args::Commands::Config { num_slots } => cli::configure(num_slots)
             .await
             .unwrap_or_else(|e| eprintln!("Error configure: {}", e)),

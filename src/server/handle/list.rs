@@ -23,7 +23,6 @@ pub async fn list_tasks(
 mod tests {
     use super::*;
     use crate::server::state::{ChannelMessage, Task, TaskAction, TaskStatus};
-    use axum::extract;
     use std::error::Error;
     use std::{collections::BTreeMap, path::PathBuf};
     use tokio::sync::watch;
@@ -58,7 +57,7 @@ mod tests {
         );
         *state.tasks.lock().await = tasks.clone();
         // 调用结果
-        let extract::Json(result) = list_tasks(State(Arc::clone(&state))).await?;
+        let Json(result) = list_tasks(State(Arc::clone(&state))).await?;
 
         assert_eq!(result.num_slots, 1);
         assert_eq!(result.used_slots, 0);
