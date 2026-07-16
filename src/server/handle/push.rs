@@ -1,4 +1,4 @@
-use crate::server::errors::ServerError;
+use crate::errors::ServerError;
 use crate::server::scheme::PushTaskRequest;
 use crate::server::state::{ServerState, Task, TaskStatus};
 use axum::Json;

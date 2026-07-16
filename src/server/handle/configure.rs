@@ -1,4 +1,4 @@
-use crate::server::errors::ServerError;
+use crate::errors::ServerError;
 use crate::server::scheme::ConfigureRequest;
 use crate::server::state::ServerState;
 use axum::Json;

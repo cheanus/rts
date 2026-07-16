@@ -23,20 +23,20 @@ async fn main() {
         cli::args::Commands::Do { mode } => {
             if let Some(id) = mode.info {
                 cli::get_task_info(id).await.unwrap_or_else(|e| {
-                    eprintln!("Cannot get task information with id {}: {}", id, e)
+                    eprintln!("Cannot get task information with ID {}: {}", id, e)
                 })
             } else if let Some(id) = mode.cat {
                 cli::get_task_log(id, false)
                     .await
-                    .unwrap_or_else(|e| eprintln!("Cannot get log of task with id {}: {}", id, e))
+                    .unwrap_or_else(|e| eprintln!("Cannot get log of task with ID {}: {}", id, e))
             } else if let Some(id) = mode.tail {
                 cli::get_task_log(id, true)
                     .await
-                    .unwrap_or_else(|e| eprintln!("Cannot get log of task with id {}: {}", id, e))
+                    .unwrap_or_else(|e| eprintln!("Cannot get log of task with ID {}: {}", id, e))
             } else if let Some(id) = mode.remove {
                 cli::remove_task(id, false)
                     .await
-                    .unwrap_or_else(|e| eprintln!("Cannot remove task with id {}: {}", id, e))
+                    .unwrap_or_else(|e| eprintln!("Cannot remove task with ID {}: {}", id, e))
             } else if mode.clear {
                 cli::remove_task(0, true)
                     .await

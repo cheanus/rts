@@ -1,4 +1,3 @@
-mod errors;
 mod handle;
 pub mod scheme;
 pub mod state;

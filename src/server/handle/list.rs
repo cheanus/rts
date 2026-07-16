@@ -1,13 +1,10 @@
-use crate::server::errors::ServerError;
 use crate::server::scheme::ListTaskResponse;
 use crate::server::state::ServerState;
 use axum::Json;
 use axum::extract::State;
 use std::sync::Arc;
 
-pub async fn list_tasks(
-    State(state): State<Arc<ServerState>>,
-) -> Result<Json<ListTaskResponse>, ServerError> {
+pub async fn list_tasks(State(state): State<Arc<ServerState>>) -> Json<ListTaskResponse> {
     let tasks = state.tasks.lock().await;
     let num_slots = state.num_slots.lock().await;
     let used_slots = state.used_slots.lock().await;
@@ -16,7 +13,7 @@ pub async fn list_tasks(
         used_slots: *used_slots,
         tasks: tasks.clone(),
     };
-    Ok(Json(list_tasks_json))
+    Json(list_tasks_json)
 }
 
 #[cfg(test)]
@@ -57,7 +54,7 @@ mod tests {
         );
         *state.tasks.lock().await = tasks.clone();
         // 调用结果
-        let Json(result) = list_tasks(State(Arc::clone(&state))).await?;
+        let Json(result) = list_tasks(State(Arc::clone(&state))).await;
 
         assert_eq!(result.num_slots, 1);
         assert_eq!(result.used_slots, 0);

@@ -1,4 +1,4 @@
-use crate::server::errors::ServerError;
+use crate::errors::ServerError;
 use crate::server::scheme::RemoveTaskRequest;
 use crate::server::state::{ServerState, TaskStatus};
 use axum::extract::{Query, State};

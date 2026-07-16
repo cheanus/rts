@@ -1,7 +1,9 @@
 pub mod args;
 
+use super::errors::CliError;
 use super::server::scheme::{ListTaskResponse, PushTaskRequest, RemoveTaskRequest, TaskIdRequest};
 use super::server::state::Task;
+use crate::errors::ResponseError;
 use rev_buf_reader::RevBufReader;
 use std::collections::HashMap;
 use std::env;
@@ -17,15 +19,16 @@ pub fn get_server_host() -> String {
 
 pub async fn list_tasks() -> Result<(), Box<dyn Error>> {
     let server_host = get_server_host();
+    let response = reqwest::get(format!("http://{server_host}/tasks/list")).await?;
+    if response.error_for_status_ref().is_err() {
+        return Err(Box::new(CliError(response.json::<ResponseError>().await?)));
+    }
 
     let ListTaskResponse {
         num_slots,
         used_slots,
         tasks,
-    } = reqwest::get(format!("http://{server_host}/tasks/list"))
-        .await?
-        .json::<ListTaskResponse>()
-        .await?;
+    } = response.json::<ListTaskResponse>().await?;
     println!("Task list");
     println!(
         "ID\tLabel\tOutput\tStatus\tCommand ({}/{})",
@@ -47,13 +50,15 @@ pub async fn list_tasks() -> Result<(), Box<dyn Error>> {
 pub async fn get_task_info(task_id: u32) -> Result<(), Box<dyn Error>> {
     let server_host = get_server_host();
     let client = reqwest::Client::new();
-    let task = client
+    let response = client
         .get(format!("http://{server_host}/tasks/info"))
         .query(&TaskIdRequest { task_id })
         .send()
-        .await?
-        .json::<Task>()
         .await?;
+    if response.error_for_status_ref().is_err() {
+        return Err(Box::new(CliError(response.json::<ResponseError>().await?)));
+    }
+    let task = response.json::<Task>().await?;
     println!("Status: {:?}", task.status);
     println!("Command: {}", task.command);
     println!("Label: {}", task.label.as_deref().unwrap_or(""));
@@ -78,13 +83,15 @@ pub async fn get_task_info(task_id: u32) -> Result<(), Box<dyn Error>> {
 pub async fn get_task_log(task_id: u32, is_tail: bool) -> Result<(), Box<dyn Error>> {
     let server_host = get_server_host();
     let client = reqwest::Client::new();
-    let task = client
+    let response = client
         .get(format!("http://{server_host}/tasks/info"))
         .query(&TaskIdRequest { task_id })
         .send()
-        .await?
-        .json::<Task>()
         .await?;
+    if response.error_for_status_ref().is_err() {
+        return Err(Box::new(CliError(response.json::<ResponseError>().await?)));
+    }
+    let task = response.json::<Task>().await?;
     if let Some(log_path) = task.log_path {
         let file = fs::File::open(log_path)?;
         if !is_tail {
@@ -127,11 +134,14 @@ pub async fn push_task(
         envs: env::vars().collect(),
     };
     let client = reqwest::Client::new();
-    client
+    let response = client
         .post(format!("http://{server_host}/tasks/push"))
         .json(&data)
         .send()
         .await?;
+    if response.error_for_status_ref().is_err() {
+        return Err(Box::new(CliError(response.json::<ResponseError>().await?)));
+    }
     Ok(())
 }
 
@@ -139,11 +149,14 @@ pub async fn remove_task(task_id: u32, is_all: bool) -> Result<(), Box<dyn Error
     let server_host = get_server_host();
     let data = RemoveTaskRequest { task_id, is_all };
     let client = reqwest::Client::new();
-    client
+    let response = client
         .get(format!("http://{server_host}/tasks/remove"))
         .query(&data)
         .send()
         .await?;
+    if response.error_for_status_ref().is_err() {
+        return Err(Box::new(CliError(response.json::<ResponseError>().await?)));
+    }
     Ok(())
 }
 
@@ -152,10 +165,13 @@ pub async fn configure(num_slots: u32) -> Result<(), Box<dyn Error>> {
     let mut data = HashMap::new();
     data.insert("num_slots", num_slots);
     let client = reqwest::Client::new();
-    client
+    let response = client
         .post(format!("http://{server_host}/configure"))
         .json(&data)
         .send()
         .await?;
+    if response.error_for_status_ref().is_err() {
+        return Err(Box::new(CliError(response.json::<ResponseError>().await?)));
+    }
     Ok(())
 }

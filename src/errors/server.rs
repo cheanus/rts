@@ -1,3 +1,4 @@
+use crate::errors::ResponseError;
 use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -28,9 +29,9 @@ impl IntoResponse for ServerError {
             }
         };
 
-        let body = json!({
-            "error": message,
-            "code": code,
+        let body = json!(ResponseError {
+            code: code.to_string(),
+            message: message.to_string()
         });
 
         (status, Json(body)).into_response()
