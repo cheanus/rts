@@ -24,9 +24,6 @@ pub async fn remove_task(
     } else {
         let task_id = request.task_id;
         match tasks.get(&task_id) {
-            Some(task) if task.status == TaskStatus::Pending => Err(ServerError::InvalidParams(
-                format!("Task {task_id} is pending!"),
-            )),
             Some(task) if task.status == TaskStatus::Running => Err(ServerError::InvalidParams(
                 format!("Task {task_id} is running!"),
             )),
