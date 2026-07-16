@@ -1,7 +1,6 @@
 pub mod args;
 
-use super::cli::args::GetTaskMode;
-use super::server::scheme::{ListTaskResponse, PushTaskRequest};
+use super::server::scheme::{ListTaskResponse, PushTaskRequest, RemoveTaskRequest, TaskIdRequest};
 use super::server::state::Task;
 use rev_buf_reader::RevBufReader;
 use std::collections::HashMap;
@@ -50,7 +49,7 @@ pub async fn get_task_info(task_id: u32) -> Result<(), Box<dyn Error>> {
     let client = reqwest::Client::new();
     let task = client
         .get(format!("http://{server_host}/tasks/info"))
-        .query(&[("task_id", task_id)])
+        .query(&TaskIdRequest { task_id })
         .send()
         .await?
         .json::<Task>()
@@ -76,25 +75,25 @@ pub async fn get_task_info(task_id: u32) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-pub async fn get_task_log(mode: GetTaskMode, task_id: u32) -> Result<(), Box<dyn Error>> {
+pub async fn get_task_log(task_id: u32, is_tail: bool) -> Result<(), Box<dyn Error>> {
     let server_host = get_server_host();
     let client = reqwest::Client::new();
     let task = client
         .get(format!("http://{server_host}/tasks/info"))
-        .query(&[("task_id", task_id)])
+        .query(&TaskIdRequest { task_id })
         .send()
         .await?
         .json::<Task>()
         .await?;
     if let Some(log_path) = task.log_path {
         let file = fs::File::open(log_path)?;
-        if mode.cat {
+        if !is_tail {
             // 逐行读取
             let reader = BufReader::new(file);
             for line in reader.lines() {
                 println!("{}", line?);
             }
-        } else if mode.tail {
+        } else {
             let reader = RevBufReader::new(file);
             for line in reader
                 .lines()
@@ -131,6 +130,18 @@ pub async fn push_task(
     client
         .post(format!("http://{server_host}/tasks/push"))
         .json(&data)
+        .send()
+        .await?;
+    Ok(())
+}
+
+pub async fn remove_task(task_id: u32, is_all: bool) -> Result<(), Box<dyn Error>> {
+    let server_host = get_server_host();
+    let data = RemoveTaskRequest { task_id, is_all };
+    let client = reqwest::Client::new();
+    client
+        .get(format!("http://{server_host}/tasks/remove"))
+        .query(&data)
         .send()
         .await?;
     Ok(())

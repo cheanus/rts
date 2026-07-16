@@ -16,23 +16,35 @@ async fn main() {
             command,
         } => cli::push_task(label, path, command.join(" "))
             .await
-            .unwrap_or_else(|e| eprintln!("Error pushing task: {}", e)),
+            .unwrap_or_else(|e| eprintln!("Cannot push task: {}", e)),
         cli::args::Commands::List => cli::list_tasks()
             .await
-            .unwrap_or_else(|e| eprintln!("Error listing tasks: {}", e)),
-        cli::args::Commands::Get { mode, id } => {
-            if let Some(mode) = mode {
-                cli::get_task_log(mode, id)
+            .unwrap_or_else(|e| eprintln!("Cannot list tasks: {}", e)),
+        cli::args::Commands::Do { mode } => {
+            if let Some(id) = mode.info {
+                cli::get_task_info(id).await.unwrap_or_else(|e| {
+                    eprintln!("Cannot get task information with id {}: {}", id, e)
+                })
+            } else if let Some(id) = mode.cat {
+                cli::get_task_log(id, false)
                     .await
-                    .unwrap_or_else(|e| eprintln!("Error get log of task with id {}: {}", id, e))
-            } else {
-                cli::get_task_info(id)
+                    .unwrap_or_else(|e| eprintln!("Cannot get log of task with id {}: {}", id, e))
+            } else if let Some(id) = mode.tail {
+                cli::get_task_log(id, true)
                     .await
-                    .unwrap_or_else(|e| eprintln!("Error get task with id {}: {}", id, e))
+                    .unwrap_or_else(|e| eprintln!("Cannot get log of task with id {}: {}", id, e))
+            } else if let Some(id) = mode.remove {
+                cli::remove_task(id, false)
+                    .await
+                    .unwrap_or_else(|e| eprintln!("Cannot remove task with id {}: {}", id, e))
+            } else if mode.clear {
+                cli::remove_task(0, true)
+                    .await
+                    .unwrap_or_else(|e| eprintln!("Cannot clear all tasks: {}", e))
             }
         }
         cli::args::Commands::Config { num_slots } => cli::configure(num_slots)
             .await
-            .unwrap_or_else(|e| eprintln!("Error configure: {}", e)),
+            .unwrap_or_else(|e| eprintln!("Cannot configure: {}", e)),
     }
 }

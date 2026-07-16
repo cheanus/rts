@@ -30,14 +30,11 @@ pub enum Commands {
     /// List tasks
     List,
 
-    /// Get a task
-    Get {
+    /// Operate tasks
+    Do {
         // Choose mode to get task
         #[command(flatten)]
-        mode: Option<GetTaskMode>,
-        /// The id of task to get
-        #[arg(required = true)]
-        id: u32,
+        mode: TaskMode,
     },
 
     /// Configure the RTS server
@@ -50,11 +47,20 @@ pub enum Commands {
 
 #[derive(Debug, Parser)]
 #[group(multiple = false)]
-pub struct GetTaskMode {
-    /// Cat log
+pub struct TaskMode {
+    /// Get information of task with ID
     #[arg(short)]
-    pub cat: bool,
-    /// Tail log
+    pub info: Option<u32>,
+    /// Cat log of task with ID
     #[arg(short)]
-    pub tail: bool,
+    pub cat: Option<u32>,
+    /// Tail log of task with ID
+    #[arg(short)]
+    pub tail: Option<u32>,
+    /// Remove a task with ID
+    #[arg(short)]
+    pub remove: Option<u32>,
+    /// Clear all tasks
+    #[arg(short = 'C')]
+    pub clear: bool,
 }

@@ -1,5 +1,5 @@
 use crate::server::errors::ServerError;
-use crate::server::scheme::TaskInfoRequest;
+use crate::server::scheme::TaskIdRequest;
 use crate::server::state::{ServerState, Task};
 use axum::Json;
 use axum::extract::{Query, State};
@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 pub async fn get_task_info(
     State(state): State<Arc<ServerState>>,
-    Query(request): Query<TaskInfoRequest>,
+    Query(request): Query<TaskIdRequest>,
 ) -> Result<Json<Task>, ServerError> {
     let tasks = state.tasks.lock().await;
     match tasks.get(&request.task_id) {
@@ -48,8 +48,7 @@ mod tests {
             tasks.insert(0, task.clone());
         }
         // 调用结果
-        let Json(result) =
-            get_task_info(State(state), Query(TaskInfoRequest { task_id: 0 })).await?;
+        let Json(result) = get_task_info(State(state), Query(TaskIdRequest { task_id: 0 })).await?;
 
         assert_eq!(result, task);
         Ok(())

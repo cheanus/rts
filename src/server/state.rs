@@ -88,7 +88,6 @@ pub enum TaskId {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TaskAction {
     Run,
-    // Remove,
     Complete,
     Fail,
 }

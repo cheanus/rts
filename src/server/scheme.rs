@@ -25,7 +25,13 @@ pub struct ListTaskResponse {
     pub tasks: BTreeMap<u32, Task>,
 }
 
-#[derive(serde::Deserialize)]
-pub struct TaskInfoRequest {
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct TaskIdRequest {
     pub task_id: u32,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct RemoveTaskRequest {
+    pub task_id: u32,
+    pub is_all: bool,
 }

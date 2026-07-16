@@ -26,6 +26,7 @@ pub async fn server(server_host: String) {
         .route("/health", get(|| async { "Hello, World!" }))
         .route("/tasks/info", get(handle::get_task_info))
         .route("/tasks/list", get(handle::list_tasks))
+        .route("/tasks/remove", get(handle::remove_task))
         .route("/tasks/push", post(handle::push_task))
         .route("/configure", post(handle::configure))
         .with_state(state);
