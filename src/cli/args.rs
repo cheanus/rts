@@ -40,7 +40,7 @@ pub enum Commands {
     /// Configure the RTS server
     Config {
         /// Get/set the number of max simultaneous jobs
-        #[arg(short = 'S', default_value_t = 1)]
+        #[arg(short = 'S')]
         num_slots: u32,
     },
 }
@@ -48,17 +48,17 @@ pub enum Commands {
 #[derive(Debug, Parser)]
 #[group(multiple = false)]
 pub struct TaskMode {
-    /// Get information of task with ID
-    #[arg(short)]
+    /// Get information of task
+    #[arg(short, value_name = "ID")]
     pub info: Option<u32>,
-    /// Cat log of task with ID
-    #[arg(short)]
+    /// Cat log of task
+    #[arg(short, value_name = "ID")]
     pub cat: Option<u32>,
-    /// Tail log of task with ID
-    #[arg(short)]
+    /// Tail log of task
+    #[arg(short, value_name = "ID")]
     pub tail: Option<u32>,
-    /// Remove a task with ID
-    #[arg(short)]
+    /// Remove a task
+    #[arg(short, value_name = "ID")]
     pub remove: Option<u32>,
     /// Clear all tasks
     #[arg(short = 'C')]
