@@ -67,6 +67,7 @@ pub struct Task {
     pub create_time: DateTime<Local>,
     pub start_time: Option<DateTime<Local>>,
     pub end_time: Option<DateTime<Local>>,
+    pub exit_code: Option<i32>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -76,6 +77,7 @@ pub enum TaskStatus {
     Running,
     Completed,
     Failed,
+    // Killed,
     // Skipped,
 }
 
@@ -89,7 +91,8 @@ pub enum TaskId {
 pub enum TaskAction {
     Run,
     Complete,
-    Fail,
+    Fail(i32),
+    // Kill,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
