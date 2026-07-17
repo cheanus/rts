@@ -54,7 +54,7 @@ mod tests {
         );
         *state.tasks.lock().await = tasks.clone();
         // 调用结果
-        let Json(result) = list_tasks(State(Arc::clone(&state))).await;
+        let Json(result) = list_tasks(State(state)).await;
 
         assert_eq!(result.num_slots, 1);
         assert_eq!(result.used_slots, 0);

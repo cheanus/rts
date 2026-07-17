@@ -190,8 +190,8 @@ mod tests {
     use tokio::sync::watch;
     use tokio::time;
 
-    async fn get_tasks(state: Arc<ServerState>) -> BTreeMap<u32, Task> {
-        state.tasks.lock().await.clone()
+    async fn get_tasks<'a>(state: &'a Arc<ServerState>) -> MutexGuard<'a, BTreeMap<u32, Task>> {
+        state.tasks.lock().await
     }
 
     #[tokio::test]
@@ -207,8 +207,7 @@ mod tests {
         let state_clone = Arc::clone(&state);
 
         // 运行 rx_worker 线程
-        let tx_clone = tx.clone();
-        tokio::spawn(async move { rx_worker(tx_clone, rx, state_clone).await });
+        tokio::spawn(async move { rx_worker(tx, rx, state_clone).await });
 
         // 创建示例任务
         for task_id in 0..3 {
@@ -223,20 +222,24 @@ mod tests {
         }
 
         // 检查任务状态
-        time::sleep(Duration::from_millis(50)).await;
-        let tasks_now = get_tasks(Arc::clone(&state)).await;
-        assert_eq!(tasks_now.get(&0).unwrap().status, TaskStatus::Running);
-        assert_eq!(tasks_now.get(&1).unwrap().status, TaskStatus::Running);
-        assert_eq!(tasks_now.get(&2).unwrap().status, TaskStatus::Pending);
-        // 检查日志文件内容
-        assert_eq!(fs::read_to_string("/tmp/rtx/test_worker_0")?, "Hi task 0\n");
-        assert_eq!(fs::read_to_string("/tmp/rtx/test_worker_1")?, "Hi task 1\n");
+        {
+            time::sleep(Duration::from_millis(50)).await;
+            let tasks_now = get_tasks(&state).await;
+            assert_eq!(tasks_now.get(&0).unwrap().status, TaskStatus::Running);
+            assert_eq!(tasks_now.get(&1).unwrap().status, TaskStatus::Running);
+            assert_eq!(tasks_now.get(&2).unwrap().status, TaskStatus::Pending);
+            // 检查日志文件内容
+            assert_eq!(fs::read_to_string("/tmp/rtx/test_worker_0")?, "Hi task 0\n");
+            assert_eq!(fs::read_to_string("/tmp/rtx/test_worker_1")?, "Hi task 1\n");
+        }
 
-        time::sleep(Duration::from_millis(100)).await;
-        let tasks_now = get_tasks(Arc::clone(&state)).await;
-        // 检查结束时间
-        assert!(tasks_now.get(&0).unwrap().end_time.is_some());
-        assert!(tasks_now.get(&1).unwrap().end_time.is_some());
+        {
+            time::sleep(Duration::from_millis(100)).await;
+            let tasks_now = get_tasks(&state).await;
+            // 检查结束时间
+            assert!(tasks_now.get(&0).unwrap().end_time.is_some());
+            assert!(tasks_now.get(&1).unwrap().end_time.is_some());
+        }
 
         Ok(())
     }

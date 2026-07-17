@@ -43,8 +43,7 @@ mod tests {
             ..Default::default()
         };
         {
-            let state_clone = Arc::clone(&state);
-            let mut tasks = state_clone.tasks.lock().await;
+            let mut tasks = state.tasks.lock().await;
             tasks.insert(0, task.clone());
         }
         // 调用结果

@@ -55,16 +55,19 @@ mod tests {
         };
         push_task(State(Arc::clone(&state)), Json(request.clone())).await?;
         // 检查字段
-        let task0 = state.tasks.lock().await.get(&0).unwrap().clone();
-        assert_eq!(task0.label, request.label);
-        assert_eq!(task0.status, TaskStatus::Pending);
-        assert_eq!(task0.command, request.command);
-        assert_eq!(
-            task0.log_path,
-            Some(PathBuf::from_str("/tmp/rtx/test_push")?)
-        );
-        assert_eq!(task0.current_dir, request.current_dir);
-        assert_eq!(task0.envs, request.envs);
+        {
+            let tasks = state.tasks.lock().await;
+            let task0 = tasks.get(&0).unwrap();
+            assert_eq!(task0.label, request.label);
+            assert_eq!(task0.status, TaskStatus::Pending);
+            assert_eq!(task0.command, request.command);
+            assert_eq!(
+                task0.log_path,
+                Some(PathBuf::from_str("/tmp/rtx/test_push")?)
+            );
+            assert_eq!(task0.current_dir, request.current_dir);
+            assert_eq!(task0.envs, request.envs);
+        }
 
         rx.changed().await?; // 等待 rx 收信
         let message = *rx.borrow();
