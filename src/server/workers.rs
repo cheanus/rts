@@ -80,7 +80,7 @@ fn create_task(
                     if let Some(code) = s.code() {
                         TaskAction::Fail(code)
                     } else {
-                        TaskAction::Fail(1)
+                        TaskAction::Kill
                     }
                 }
             }
@@ -177,6 +177,13 @@ pub async fn rx_worker(
                         task.status = TaskStatus::Failed;
                         task.end_time = Some(Local::now());
                         task.exit_code = Some(code);
+                        *used_slots -= 1;
+                        try_create_tasks(used_slots, num_slots, tasks, &tx).await;
+                    }
+                    TaskAction::Kill => {
+                        task.status = TaskStatus::Killed;
+                        task.end_time = Some(Local::now());
+                        task.exit_code = Some(1);
                         *used_slots -= 1;
                         try_create_tasks(used_slots, num_slots, tasks, &tx).await;
                     }

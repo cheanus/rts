@@ -41,6 +41,10 @@ async fn main() {
                 cli::remove_task(0, true)
                     .await
                     .unwrap_or_else(|e| eprintln!("Cannot clear all tasks: {}", e))
+            } else if let Some(id) = mode.kill {
+                cli::kill_task(0)
+                    .await
+                    .unwrap_or_else(|e| eprintln!("Cannot kill task with ID {}: {}", id, e))
             }
         }
         cli::args::Commands::Config { num_slots } => cli::configure(num_slots)

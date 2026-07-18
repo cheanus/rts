@@ -63,4 +63,7 @@ pub struct TaskMode {
     /// Clear all tasks
     #[arg(short = 'C')]
     pub clear: bool,
+    /// Kill a task
+    #[arg(short, value_name = "ID")]
+    pub kill: Option<u32>,
 }

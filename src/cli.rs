@@ -168,6 +168,21 @@ pub async fn remove_task(task_id: u32, is_all: bool) -> Result<(), Box<dyn Error
     Ok(())
 }
 
+pub async fn kill_task(task_id: u32) -> Result<(), Box<dyn Error>> {
+    let server_host = get_server_host();
+    let data = TaskIdRequest { task_id };
+    let client = reqwest::Client::new();
+    let response = client
+        .get(format!("http://{server_host}/tasks/kill"))
+        .query(&data)
+        .send()
+        .await?;
+    if response.error_for_status_ref().is_err() {
+        return Err(Box::new(CliError(response.json::<ResponseError>().await?)));
+    }
+    Ok(())
+}
+
 pub async fn configure(num_slots: u32) -> Result<(), Box<dyn Error>> {
     let server_host = get_server_host();
     let mut data = HashMap::new();

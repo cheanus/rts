@@ -78,7 +78,7 @@ pub enum TaskStatus {
     Running,
     Completed,
     Failed,
-    // Killed,
+    Killed,
     // Skipped,
 }
 
@@ -93,7 +93,7 @@ pub enum TaskAction {
     Run,
     Complete,
     Fail(i32),
-    // Kill,
+    Kill,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

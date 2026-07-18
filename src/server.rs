@@ -27,6 +27,7 @@ pub async fn server(server_host: String) {
         .route("/tasks/list", get(handle::list_tasks))
         .route("/tasks/remove", get(handle::remove_task))
         .route("/tasks/push", post(handle::push_task))
+        .route("/tasks/kill", get(handle::kill_task))
         .route("/configure", post(handle::configure))
         .with_state(state);
 
