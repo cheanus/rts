@@ -67,6 +67,7 @@ pub struct Task {
     pub create_time: DateTime<Local>,
     pub start_time: Option<DateTime<Local>>,
     pub end_time: Option<DateTime<Local>>,
+    pub pid: Option<u32>,
     pub exit_code: Option<i32>,
 }
 

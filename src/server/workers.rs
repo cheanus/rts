@@ -29,7 +29,7 @@ fn create_task(
     current_dir: &PathBuf,
     envs: &HashMap<String, String>,
     tx: Sender<ChannelMessage>,
-) -> Result<PathBuf, Box<dyn Error>> {
+) -> Result<(Option<u32>, PathBuf), Box<dyn Error>> {
     // 创建 /tmp/rtx/ 临时目录
     fs::create_dir_all("/tmp/rtx").unwrap_or_else(|e| {
         eprintln!("Cannot create dir /tmp/rtx : {}", e);
@@ -67,6 +67,8 @@ fn create_task(
         persistent_path = path;
     }
 
+    let pid = child.id();
+
     // 启用一个新线程监控新进程中所执行的命令
     tokio::spawn(async move {
         let status = child.wait().await;
@@ -86,7 +88,7 @@ fn create_task(
         };
         send_task_action(&tx, task_id, task_action);
     });
-    Ok(persistent_path)
+    Ok((pid, persistent_path))
 }
 
 async fn try_create_tasks(
@@ -123,7 +125,10 @@ async fn try_create_task(
             &task.envs,
             tx.clone(),
         ) {
-            Ok(log_path) => task.log_path = Some(log_path),
+            Ok((pid, log_path)) => {
+                task.pid = pid;
+                task.log_path = Some(log_path);
+            }
             Err(_) => send_task_action(tx, task_id, TaskAction::Fail(1)),
         }
     }

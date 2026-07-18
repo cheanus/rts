@@ -60,11 +60,16 @@ pub async fn get_task_info(task_id: u32) -> Result<(), Box<dyn Error>> {
     }
     let task = response.json::<Task>().await?;
     println!("Status: {:?}", task.status);
+    if let Some(pid) = task.pid {
+        println!("PID: {}", pid);
+    }
     if let Some(exit_code) = task.exit_code {
         println!("Exit code: {}", exit_code);
     }
     println!("Command: {}", task.command);
-    println!("Label: {}", task.label.as_deref().unwrap_or(""));
+    if let Some(label) = task.label {
+        println!("Label: {}", label);
+    }
     println!(
         "Log path: {}",
         task.log_path.unwrap_or(PathBuf::from("")).display()
