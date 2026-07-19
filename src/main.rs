@@ -6,7 +6,18 @@ use rts::server;
 async fn main() {
     let args = cli::args::Args::parse();
 
-    match args.command {
+    let command = match args.command {
+        Some(cmd) => cmd,
+        None => {
+            if cli::is_server_alive().await {
+                cli::args::Commands::List
+            } else {
+                cli::args::Commands::Server
+            }
+        }
+    };
+
+    match command {
         cli::args::Commands::Server => {
             server::server(cli::get_server_host()).await;
         }

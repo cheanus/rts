@@ -18,6 +18,21 @@ pub fn get_server_host() -> String {
     format!("127.0.0.1:{}", server_port)
 }
 
+pub async fn is_server_alive() -> bool {
+    async fn get_health() -> Result<(), Box<dyn Error>> {
+        let server_host = get_server_host();
+        let response = reqwest::get(format!("http://{server_host}/health")).await?;
+        if response.error_for_status_ref().is_err() {
+            return Err(Box::new(CliError(response.json::<ResponseError>().await?)));
+        }
+        Ok(())
+    }
+    match get_health().await {
+        Ok(()) => true,
+        Err(_) => false,
+    }
+}
+
 pub async fn list_tasks() -> Result<(), Box<dyn Error>> {
     let server_host = get_server_host();
     let response = reqwest::get(format!("http://{server_host}/tasks/list")).await?;
@@ -30,7 +45,6 @@ pub async fn list_tasks() -> Result<(), Box<dyn Error>> {
         used_slots,
         tasks,
     } = response.json::<ListTaskResponse>().await?;
-    println!("Task list");
     println!(
         "ID\tLabel\tOutput\tStatus\tCommand ({}/{})",
         used_slots, num_slots

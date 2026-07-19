@@ -2,10 +2,15 @@ use clap::{Parser, Subcommand};
 
 /// Task orchestration
 #[derive(Parser)]
-#[command(version, about, long_about = None)]
+#[command(
+    version,
+    about,
+    long_about = "A task queue tool for deep learning written in Rust ",
+    subcommand_required = false
+)]
 pub struct Args {
     #[command(subcommand)]
-    pub command: Commands,
+    pub command: Option<Commands>,
 }
 
 #[derive(Subcommand, Debug)]
