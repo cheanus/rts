@@ -13,8 +13,9 @@ async fn main() {
         cli::args::Commands::Run {
             label,
             path,
+            mode,
             command,
-        } => cli::push_task(label, path, command.join(" "))
+        } => cli::push_task(label, path, mode, command.join(" "))
             .await
             .unwrap_or_else(|e| eprintln!("Cannot push task: {}", e)),
         cli::args::Commands::List => cli::list_tasks()

@@ -1,5 +1,6 @@
 pub mod args;
 
+use super::cli::args::DependTaskMode;
 use super::errors::CliError;
 use super::server::scheme::{ListTaskResponse, PushTaskRequest, RemoveTaskRequest, TaskIdRequest};
 use super::server::state::Task;
@@ -74,6 +75,16 @@ pub async fn get_task_info(task_id: u32) -> Result<(), Box<dyn Error>> {
         "Log path: {}",
         task.log_path.unwrap_or(PathBuf::from("")).display()
     );
+    if !task.dependencies.is_empty() {
+        println!(
+            "Dependence: {}",
+            task.dependencies
+                .iter()
+                .map(|(id, _)| id.to_string())
+                .collect::<Vec<String>>()
+                .join(", ")
+        );
+    }
     println!("Create time: {}", task.create_time);
     if let Some(start_time) = task.start_time {
         println!("Start time: {}", start_time);
@@ -131,15 +142,28 @@ pub async fn get_task_log(task_id: u32, is_tail: bool) -> Result<(), Box<dyn Err
 pub async fn push_task(
     label: Option<String>,
     path: Option<String>,
+    mode: Option<DependTaskMode>,
     command: String,
 ) -> Result<(), Box<dyn Error>> {
     let server_host = get_server_host();
+    let mut not_safely_depends: bool = false;
+    let mut dependencies: Vec<u32> = Vec::new();
+    if let Some(depend_mode) = mode {
+        if let Some(waits) = depend_mode.wait {
+            dependencies = waits;
+        } else if let Some(delays) = depend_mode.delay {
+            not_safely_depends = true;
+            dependencies = delays;
+        }
+    }
     let data = PushTaskRequest {
         label,
         command,
         log_path: path.map(|p| PathBuf::from(p)),
         current_dir: env::current_dir()?,
         envs: env::vars().collect(),
+        not_safely_depends,
+        dependencies,
     };
     let client = reqwest::Client::new();
     let response = client

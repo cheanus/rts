@@ -11,6 +11,8 @@ pub struct PushTaskRequest {
     pub log_path: Option<PathBuf>,
     pub current_dir: PathBuf,
     pub envs: HashMap<String, String>,
+    pub not_safely_depends: bool,
+    pub dependencies: Vec<u32>,
 }
 
 #[derive(serde::Deserialize)]

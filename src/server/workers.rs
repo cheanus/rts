@@ -1,4 +1,5 @@
 use super::state::{ChannelMessage, ServerState, Task, TaskAction, TaskStatus};
+use crate::errors::ServerError;
 use crate::server::state::TaskId;
 use chrono::Local;
 use std::collections::{BTreeMap, HashMap};
@@ -22,6 +23,32 @@ fn send_task_action(tx: &Sender<ChannelMessage>, task_id: u32, task_action: Task
     .expect("Channel sender failed send message");
 }
 
+fn update_required_status(
+    task_id: u32,
+    task_status: TaskStatus,
+    required: &[u32],
+    tasks: &mut BTreeMap<u32, Task>,
+) {
+    for (required_id, required_t) in tasks.iter_mut().filter(|(id, _)| required.contains(*id)) {
+        if let Some(t) = required_t.dependencies.get_mut(&task_id) {
+            *t = task_status;
+            if !required_t.not_safely_depends
+                && matches!(
+                    task_status,
+                    TaskStatus::Failed | TaskStatus::Killed | TaskStatus::Skipped
+                )
+            {
+                required_t.status = TaskStatus::Skipped;
+            }
+        } else {
+            eprintln!(
+                "Task {} is dependent on task {}, but task {} does not require task {}",
+                task_id, required_id, required_id, task_id
+            );
+        }
+    }
+}
+
 fn create_task(
     task_id: u32,
     command: &str,
@@ -31,10 +58,12 @@ fn create_task(
     tx: Sender<ChannelMessage>,
 ) -> Result<(Option<u32>, PathBuf), Box<dyn Error>> {
     // 创建 /tmp/rtx/ 临时目录
-    fs::create_dir_all("/tmp/rtx").unwrap_or_else(|e| {
-        eprintln!("Cannot create dir /tmp/rtx : {}", e);
-        std::process::exit(1);
-    });
+    if let Err(e) = fs::create_dir_all("/tmp/rtx") {
+        return Err(Box::new(ServerError::InternalError(format!(
+            "Cannot create dir /tmp/rtx : {}",
+            e
+        ))));
+    };
     let mut child: process::Child;
     let persistent_path: PathBuf;
     if let Some(log_path) = log_path {
@@ -114,6 +143,16 @@ async fn try_create_task(
         return;
     }
     if task.status == TaskStatus::Pending {
+        // 检查依赖状态
+        if !task.not_safely_depends {
+            let is_dependence_over = task
+                .dependencies
+                .iter()
+                .all(|(_, s)| *s == TaskStatus::Completed);
+            if !is_dependence_over {
+                return;
+            }
+        }
         **used_slots += 1;
         task.status = TaskStatus::Running;
         task.start_time = Some(Local::now());
@@ -161,36 +200,36 @@ pub async fn rx_worker(
             }
             TaskId::Old(task_id) => {
                 // 更新结束或失败任务的状态
-                let Some((_, task)) = tasks.iter_mut().find(|(i, _)| **i == task_id) else {
+                let Some(task) = tasks.get_mut(&task_id) else {
                     eprintln!("Cannot find task with ID {}", task_id);
                     continue;
                 };
                 match task_action {
                     TaskAction::Complete => {
                         task.status = TaskStatus::Completed;
-                        task.end_time = Some(Local::now());
                         task.exit_code = Some(0);
-                        *used_slots -= 1;
-                        try_create_tasks(used_slots, num_slots, tasks, &tx).await;
                     }
                     TaskAction::Fail(code) => {
                         task.status = TaskStatus::Failed;
-                        task.end_time = Some(Local::now());
                         task.exit_code = Some(code);
-                        *used_slots -= 1;
-                        try_create_tasks(used_slots, num_slots, tasks, &tx).await;
                     }
                     TaskAction::Kill => {
                         task.status = TaskStatus::Killed;
-                        task.end_time = Some(Local::now());
                         task.exit_code = Some(1);
-                        *used_slots -= 1;
-                        try_create_tasks(used_slots, num_slots, tasks, &tx).await;
                     }
                     TaskAction::Run => {
-                        try_create_task(&mut used_slots, num_slots, task_id, task, &tx).await
+                        eprintln!("Cannot start given task {}", task_id);
+                        continue;
                     }
                 }
+                task.end_time = Some(Local::now());
+                let status = task.status;
+                let required = task.required.clone();
+
+                *used_slots -= 1;
+
+                update_required_status(task_id, status, &required, &mut tasks);
+                try_create_tasks(used_slots, num_slots, tasks, &tx).await;
             }
         }
     }
@@ -209,30 +248,38 @@ mod tests {
         state.tasks.lock().await
     }
 
-    #[tokio::test]
-    async fn test_rx_work() -> Result<(), Box<dyn Error>> {
+    fn init_worker(num_slots: u32) -> Arc<ServerState> {
         // 创建信道
         let (tx, rx) = watch::channel(ChannelMessage {
             task_id: None,
             task_action: TaskAction::Complete,
         });
         // 创建全局 state
-        let server_state = ServerState::new(2, tx.clone());
+        let server_state = ServerState::new(num_slots, tx.clone());
         let state = Arc::new(server_state);
         let state_clone = Arc::clone(&state);
 
         // 运行 rx_worker 线程
         tokio::spawn(async move { rx_worker(tx, rx, state_clone).await });
+        state
+    }
+
+    #[tokio::test]
+    async fn test_rx_work() -> Result<(), Box<dyn Error>> {
+        let state = init_worker(2);
 
         // 创建示例任务
         for task_id in 0..3 {
             state
-                .push_task(Task {
-                    command: format!("echo Hi task {task_id} && sleep 0.1"),
-                    log_path: Some(PathBuf::from(format!("/tmp/rtx/test_worker_{task_id}"))),
-                    current_dir: PathBuf::from_str("/")?,
-                    ..Default::default()
-                })
+                .push_task(
+                    Task {
+                        command: format!("echo Hi task {task_id} && sleep 0.1"),
+                        log_path: Some(PathBuf::from(format!("/tmp/rtx/test_worker_{task_id}"))),
+                        current_dir: PathBuf::from_str("/")?,
+                        ..Default::default()
+                    },
+                    &[],
+                )
                 .await?;
         }
 
@@ -269,27 +316,19 @@ mod tests {
 
     #[tokio::test]
     async fn test_exit_code() -> Result<(), Box<dyn Error>> {
-        // 创建信道
-        let (tx, rx) = watch::channel(ChannelMessage {
-            task_id: None,
-            task_action: TaskAction::Complete,
-        });
-        // 创建全局 state
-        let server_state = ServerState::new(2, tx.clone());
-        let state = Arc::new(server_state);
-        let state_clone = Arc::clone(&state);
-
-        // 运行 rx_worker 线程
-        tokio::spawn(async move { rx_worker(tx, rx, state_clone).await });
+        let state = init_worker(2);
 
         // 创建示例任务
         state
-            .push_task(Task {
-                command: format!("exit 127"),
-                log_path: Some(PathBuf::from(format!("/tmp/rtx/test_exit_code"))),
-                current_dir: PathBuf::from_str("/")?,
-                ..Default::default()
-            })
+            .push_task(
+                Task {
+                    command: format!("exit 127"),
+                    log_path: Some(PathBuf::from(format!("/tmp/rtx/test_exit_code"))),
+                    current_dir: PathBuf::from_str("/")?,
+                    ..Default::default()
+                },
+                &[],
+            )
             .await?;
 
         // 检查任务状态
@@ -299,6 +338,58 @@ mod tests {
         assert_eq!(tasks_now.get(&0).unwrap().status, TaskStatus::Failed);
         assert_eq!(tasks_now.get(&0).unwrap().exit_code, Some(127));
 
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_dependence() -> Result<(), Box<dyn Error>> {
+        let state = init_worker(2);
+
+        // 创建示例任务
+        for task_id in 0..3 {
+            state
+                .push_task(
+                    Task {
+                        command: format!("sleep 0.1"),
+                        log_path: Some(PathBuf::from(format!(
+                            "/tmp/rtx/test_dependence_{task_id}"
+                        ))),
+                        current_dir: PathBuf::from_str("/")?,
+                        ..Default::default()
+                    },
+                    &[],
+                )
+                .await?;
+        }
+        state
+            .push_task(
+                Task {
+                    command: format!("sleep 0.1"),
+                    log_path: Some(PathBuf::from(format!("/tmp/rtx/test_dependence_4"))),
+                    current_dir: PathBuf::from_str("/")?,
+                    ..Default::default()
+                },
+                &[0, 1, 2],
+            )
+            .await?;
+
+        // 检查任务状态
+        {
+            time::sleep(Duration::from_millis(50)).await;
+            let tasks_now = get_tasks(&state).await;
+            assert_eq!(tasks_now.get(&0).unwrap().status, TaskStatus::Running);
+            assert_eq!(tasks_now.get(&1).unwrap().status, TaskStatus::Running);
+            assert_eq!(tasks_now.get(&2).unwrap().status, TaskStatus::Pending);
+            assert_eq!(tasks_now.get(&3).unwrap().status, TaskStatus::Pending);
+        }
+        {
+            time::sleep(Duration::from_millis(100)).await;
+            let tasks_now = get_tasks(&state).await;
+            assert_eq!(tasks_now.get(&0).unwrap().status, TaskStatus::Completed);
+            assert_eq!(tasks_now.get(&1).unwrap().status, TaskStatus::Completed);
+            assert_eq!(tasks_now.get(&2).unwrap().status, TaskStatus::Running);
+            assert_eq!(tasks_now.get(&3).unwrap().status, TaskStatus::Pending);
+        }
         Ok(())
     }
 }

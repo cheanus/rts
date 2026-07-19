@@ -22,6 +22,9 @@ pub enum Commands {
         /// Optional log path
         #[arg(short, long)]
         path: Option<String>,
+        /// Optional dependence mode
+        #[command(flatten)]
+        mode: Option<DependTaskMode>,
         /// The command to execute
         #[arg(required = true, allow_hyphen_values = true)]
         command: Vec<String>,
@@ -34,7 +37,7 @@ pub enum Commands {
     Do {
         // Choose mode to get task
         #[command(flatten)]
-        mode: TaskMode,
+        mode: DoTaskMode,
     },
 
     /// Configure the RTS server
@@ -47,7 +50,7 @@ pub enum Commands {
 
 #[derive(Debug, Parser)]
 #[group(multiple = false)]
-pub struct TaskMode {
+pub struct DoTaskMode {
     /// Get information of task
     #[arg(short, value_name = "ID")]
     pub info: Option<u32>,
@@ -66,4 +69,15 @@ pub struct TaskMode {
     /// Kill a task
     #[arg(short, value_name = "ID")]
     pub kill: Option<u32>,
+}
+
+#[derive(Debug, Parser)]
+#[group(multiple = false)]
+pub struct DependTaskMode {
+    /// The job will be run after the job of given IDs ends well (exit code 0).
+    #[arg(short, value_name = "ID,...", value_delimiter = ',')]
+    pub wait: Option<Vec<u32>>,
+    /// The job will be run after the job of given IDs ends.
+    #[arg(short, value_name = "ID,...", value_delimiter = ',')]
+    pub delay: Option<Vec<u32>>,
 }

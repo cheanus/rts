@@ -40,11 +40,32 @@ impl ServerState {
         Ok(())
     }
 
-    pub async fn push_task(&self, task: Task) -> Result<(), ServerError> {
-        let mut task_id_counter = self.task_id_counter.lock().await;
+    pub async fn push_task(
+        &self,
+        mut task: Task,
+        dependence_ids: &[u32],
+    ) -> Result<(), ServerError> {
         // 由于 state.tasks 是 BTreeMap，所以各 task 默认是按创建时间排序的
-        self.tasks.lock().await.insert(*task_id_counter, task);
+        let mut tasks = self.tasks.lock().await;
+        // 验证 dependence_ids 有效性
+        if tasks.iter().any(|(id, _)| tasks.get(id).is_none()) {
+            return Err(ServerError::InvalidParams(
+                "Invalid dependence task IDs".into(),
+            ));
+        }
 
+        let mut dependencies = HashMap::new();
+        let mut task_id_counter = self.task_id_counter.lock().await;
+        for (id, t) in tasks
+            .iter_mut()
+            .filter(|(id, _)| dependence_ids.contains(*id))
+        {
+            dependencies.insert(*id, t.status);
+            t.required.push(*task_id_counter);
+        }
+        task.dependencies = dependencies;
+
+        tasks.insert(*task_id_counter, task);
         *task_id_counter += 1;
 
         let tx = &self.tx;
@@ -69,6 +90,9 @@ pub struct Task {
     pub end_time: Option<DateTime<Local>>,
     pub pid: Option<u32>,
     pub exit_code: Option<i32>,
+    pub not_safely_depends: bool,
+    pub dependencies: HashMap<u32, TaskStatus>,
+    pub required: Vec<u32>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -79,7 +103,7 @@ pub enum TaskStatus {
     Completed,
     Failed,
     Killed,
-    // Skipped,
+    Skipped,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

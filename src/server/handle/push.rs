@@ -23,9 +23,10 @@ pub async fn push_task(
         current_dir: PathBuf::from(request.current_dir),
         envs: request.envs,
         create_time: Local::now(),
+        not_safely_depends: request.not_safely_depends,
         ..Default::default()
     };
-    state.push_task(task).await
+    state.push_task(task, &request.dependencies).await
 }
 
 #[cfg(test)]
@@ -52,6 +53,8 @@ mod tests {
             log_path: Some(PathBuf::from_str("/tmp/rtx/test_push")?),
             current_dir: PathBuf::from_str("/")?,
             envs: HashMap::from([("PYTHONPATH".to_string(), "/".to_string())]),
+            not_safely_depends: false,
+            dependencies: Vec::new(),
         };
         push_task(State(Arc::clone(&state)), Json(request.clone())).await?;
         // 检查字段
