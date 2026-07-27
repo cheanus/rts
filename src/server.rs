@@ -1,4 +1,4 @@
-mod handle;
+mod handlers;
 pub mod scheme;
 pub mod state;
 mod workers;
@@ -23,12 +23,12 @@ pub async fn server(server_host: String) {
 
     let app = Router::new()
         .route("/health", get(|| async { "Hello, World!" }))
-        .route("/tasks/info", get(handle::get_task_info))
-        .route("/tasks/list", get(handle::list_tasks))
-        .route("/tasks/remove", get(handle::remove_task))
-        .route("/tasks/push", post(handle::push_task))
-        .route("/tasks/kill", get(handle::kill_task))
-        .route("/configure", post(handle::configure))
+        .route("/tasks/info", get(handlers::get_task_info))
+        .route("/tasks/list", get(handlers::list_tasks))
+        .route("/tasks/remove", get(handlers::remove_task))
+        .route("/tasks/push", post(handlers::push_task))
+        .route("/tasks/kill", get(handlers::kill_task))
+        .route("/configure", post(handlers::configure))
         .with_state(state);
 
     let listener = TcpListener::bind(&server_host).await.unwrap_or_else(|e| {

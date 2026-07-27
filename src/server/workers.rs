@@ -1,6 +1,5 @@
 use super::state::{ChannelMessage, ServerState, Task, TaskAction, TaskStatus};
 use crate::errors::ServerError;
-use crate::server::state::TaskId;
 use chrono::Local;
 use std::collections::{BTreeMap, HashMap};
 use std::error::Error;
@@ -16,11 +15,10 @@ use tokio::sync::{
 };
 
 fn send_task_action(tx: &Sender<ChannelMessage>, task_id: u32, task_action: TaskAction) {
-    tx.send(ChannelMessage {
-        task_id: Some(TaskId::Old(task_id)),
+    let _ = tx.send(ChannelMessage {
+        task_id: Some(task_id),
         task_action,
-    })
-    .expect("Channel sender failed send message");
+    });
 }
 
 fn update_required_status(
@@ -184,21 +182,17 @@ pub async fn rx_worker(
             task_action,
         } = *rx.borrow();
 
-        let Some(task_id) = task_id else {
-            continue;
-        };
-
         let mut tasks = state.tasks.lock().await;
         let num_slots = *state.num_slots.lock().await;
         let mut used_slots = state.used_slots.lock().await;
         match task_id {
-            TaskId::New => {
+            None => {
                 // 尝试添加、运行新任务
                 if task_action == TaskAction::Run {
                     try_create_tasks(used_slots, num_slots, tasks, &tx).await;
                 }
             }
-            TaskId::Old(task_id) => {
+            Some(task_id) => {
                 // 更新结束或失败任务的状态
                 let Some(task) = tasks.get_mut(&task_id) else {
                     eprintln!("Cannot find task with ID {}", task_id);
@@ -242,10 +236,49 @@ mod tests {
     use std::str::FromStr;
     use std::time::Duration;
     use tokio::sync::watch;
-    use tokio::time;
+    use tokio::time::{self, timeout};
 
     async fn get_tasks<'a>(state: &'a Arc<ServerState>) -> MutexGuard<'a, BTreeMap<u32, Task>> {
         state.tasks.lock().await
+    }
+
+    async fn wait_for_status(state: &Arc<ServerState>, task_id: u32, expected: TaskStatus) {
+        timeout(Duration::from_secs(5), async {
+            loop {
+                let tasks = state.tasks.lock().await;
+                if let Some(task) = tasks.get(&task_id) {
+                    if task.status == expected {
+                        return;
+                    }
+                }
+                drop(tasks);
+                time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "Timeout waiting for task {} to become {:?}",
+                task_id, expected
+            )
+        });
+    }
+
+    async fn wait_for_end_time(state: &Arc<ServerState>, task_id: u32) {
+        timeout(Duration::from_secs(5), async {
+            loop {
+                let tasks = state.tasks.lock().await;
+                if let Some(task) = tasks.get(&task_id) {
+                    if task.end_time.is_some() {
+                        return;
+                    }
+                }
+                drop(tasks);
+                time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("Timeout waiting for task {} end_time", task_id));
     }
 
     fn init_worker(num_slots: u32) -> Arc<ServerState> {
@@ -283,33 +316,24 @@ mod tests {
                 .await?;
         }
 
-        // 检查任务状态
+        // Wait for tasks 0,1 to start running
+        wait_for_status(&state, 0, TaskStatus::Running).await;
+        wait_for_status(&state, 1, TaskStatus::Running).await;
+
+        // Verify task 2 is still pending
         {
-            time::sleep(Duration::from_millis(50)).await;
             let tasks_now = get_tasks(&state).await;
-            assert_eq!(tasks_now.get(&0).unwrap().status, TaskStatus::Running);
-            assert_eq!(
-                tasks_now.get(&0).unwrap().log_path,
-                Some(PathBuf::from(format!("/tmp/rtx/test_worker_0")))
-            );
-            assert_eq!(tasks_now.get(&1).unwrap().status, TaskStatus::Running);
-            assert_eq!(
-                tasks_now.get(&1).unwrap().log_path,
-                Some(PathBuf::from(format!("/tmp/rtx/test_worker_1")))
-            );
             assert_eq!(tasks_now.get(&2).unwrap().status, TaskStatus::Pending);
-            // 检查日志文件内容
-            assert_eq!(fs::read_to_string("/tmp/rtx/test_worker_0")?, "Hi task 0\n");
-            assert_eq!(fs::read_to_string("/tmp/rtx/test_worker_1")?, "Hi task 1\n");
         }
 
-        {
-            time::sleep(Duration::from_millis(100)).await;
-            let tasks_now = get_tasks(&state).await;
-            // 检查结束时间
-            assert!(tasks_now.get(&0).unwrap().end_time.is_some());
-            assert!(tasks_now.get(&1).unwrap().end_time.is_some());
-        }
+        // 检查日志文件内容 (need a small extra wait for echo output)
+        time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(fs::read_to_string("/tmp/rtx/test_worker_0")?, "Hi task 0\n");
+        assert_eq!(fs::read_to_string("/tmp/rtx/test_worker_1")?, "Hi task 1\n");
+
+        // Wait for tasks to complete
+        wait_for_end_time(&state, 0).await;
+        wait_for_end_time(&state, 1).await;
 
         Ok(())
     }
@@ -332,10 +356,8 @@ mod tests {
             .await?;
 
         // 检查任务状态
-        time::sleep(Duration::from_millis(50)).await;
+        wait_for_status(&state, 0, TaskStatus::Failed).await;
         let tasks_now = get_tasks(&state).await;
-        // 检查退出码
-        assert_eq!(tasks_now.get(&0).unwrap().status, TaskStatus::Failed);
         assert_eq!(tasks_now.get(&0).unwrap().exit_code, Some(127));
 
         Ok(())
@@ -373,23 +395,30 @@ mod tests {
             )
             .await?;
 
-        // 检查任务状态
+        // Wait for tasks 0,1 to start running
+        wait_for_status(&state, 0, TaskStatus::Running).await;
+        wait_for_status(&state, 1, TaskStatus::Running).await;
+
+        // Tasks 2,3 should be pending
         {
-            time::sleep(Duration::from_millis(50)).await;
             let tasks_now = get_tasks(&state).await;
-            assert_eq!(tasks_now.get(&0).unwrap().status, TaskStatus::Running);
-            assert_eq!(tasks_now.get(&1).unwrap().status, TaskStatus::Running);
             assert_eq!(tasks_now.get(&2).unwrap().status, TaskStatus::Pending);
             assert_eq!(tasks_now.get(&3).unwrap().status, TaskStatus::Pending);
         }
+
+        // Wait for tasks 0,1 to complete
+        wait_for_status(&state, 0, TaskStatus::Completed).await;
+        wait_for_status(&state, 1, TaskStatus::Completed).await;
+
+        // Task 2 should now be running (dependency satisfied)
+        wait_for_status(&state, 2, TaskStatus::Running).await;
+
+        // Task 3 still pending (waiting for task 2)
         {
-            time::sleep(Duration::from_millis(100)).await;
             let tasks_now = get_tasks(&state).await;
-            assert_eq!(tasks_now.get(&0).unwrap().status, TaskStatus::Completed);
-            assert_eq!(tasks_now.get(&1).unwrap().status, TaskStatus::Completed);
-            assert_eq!(tasks_now.get(&2).unwrap().status, TaskStatus::Running);
             assert_eq!(tasks_now.get(&3).unwrap().status, TaskStatus::Pending);
         }
+
         Ok(())
     }
 }

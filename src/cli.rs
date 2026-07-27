@@ -1,14 +1,13 @@
 pub mod args;
 
-use super::cli::args::DependTaskMode;
-use super::errors::CliError;
-use super::server::scheme::{ListTaskResponse, PushTaskRequest, RemoveTaskRequest, TaskIdRequest};
-use super::server::state::Task;
-use crate::errors::ResponseError;
+use crate::cli::args::DoTaskMode;
+use crate::errors::CliError;
+use crate::server::scheme::{
+    ConfigureRequest, ListTaskResponse, PushTaskRequest, RemoveTaskRequest, TaskIdRequest,
+};
+use crate::server::state::Task;
 use rev_buf_reader::RevBufReader;
-use std::collections::HashMap;
 use std::env;
-use std::error::Error;
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
@@ -19,220 +18,257 @@ pub fn get_server_host() -> String {
 }
 
 pub async fn is_server_alive() -> bool {
-    async fn get_health() -> Result<(), Box<dyn Error>> {
-        let server_host = get_server_host();
-        let response = reqwest::get(format!("http://{server_host}/health")).await?;
+    let client = RtsClient::new();
+    client.get_health().await.is_ok()
+}
+
+pub struct RtsClient {
+    client: reqwest::Client,
+    server_host: String,
+}
+
+impl Default for RtsClient {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl RtsClient {
+    pub fn new() -> Self {
+        RtsClient {
+            client: reqwest::Client::new(),
+            server_host: get_server_host(),
+        }
+    }
+
+    async fn get_health(&self) -> Result<(), CliError> {
+        let response = self
+            .client
+            .get(format!("http://{}/health", self.server_host))
+            .send()
+            .await?;
         if response.error_for_status_ref().is_err() {
-            return Err(Box::new(CliError(response.json::<ResponseError>().await?)));
+            return Err(CliError::Http {
+                status: response.status(),
+                body: response.json::<crate::errors::ResponseError>().await?,
+            });
         }
         Ok(())
     }
-    match get_health().await {
-        Ok(()) => true,
-        Err(_) => false,
-    }
-}
 
-pub async fn list_tasks() -> Result<(), Box<dyn Error>> {
-    let server_host = get_server_host();
-    let response = reqwest::get(format!("http://{server_host}/tasks/list")).await?;
-    if response.error_for_status_ref().is_err() {
-        return Err(Box::new(CliError(response.json::<ResponseError>().await?)));
+    async fn get_json<T: serde::de::DeserializeOwned>(&self, path: &str) -> Result<T, CliError> {
+        let response = self
+            .client
+            .get(format!("http://{}{}", self.server_host, path))
+            .send()
+            .await?;
+        if response.error_for_status_ref().is_err() {
+            return Err(CliError::Http {
+                status: response.status(),
+                body: response.json::<crate::errors::ResponseError>().await?,
+            });
+        }
+        Ok(response.json::<T>().await?)
     }
 
-    let ListTaskResponse {
-        num_slots,
-        used_slots,
-        tasks,
-    } = response.json::<ListTaskResponse>().await?;
-    println!(
-        "ID\tLabel\tOutput\tStatus\tCommand ({}/{})",
-        used_slots, num_slots
-    );
-    for (task_id, task) in tasks {
+    async fn get_success(&self, path: &str) -> Result<(), CliError> {
+        let response = self
+            .client
+            .get(format!("http://{}{}", self.server_host, path))
+            .send()
+            .await?;
+        if response.error_for_status_ref().is_err() {
+            return Err(CliError::Http {
+                status: response.status(),
+                body: response.json::<crate::errors::ResponseError>().await?,
+            });
+        }
+        Ok(())
+    }
+
+    async fn post_success<T: serde::Serialize>(
+        &self,
+        path: &str,
+        body: &T,
+    ) -> Result<(), CliError> {
+        let response = self
+            .client
+            .post(format!("http://{}{}", self.server_host, path))
+            .json(body)
+            .send()
+            .await?;
+        if response.error_for_status_ref().is_err() {
+            return Err(CliError::Http {
+                status: response.status(),
+                body: response.json::<crate::errors::ResponseError>().await?,
+            });
+        }
+        Ok(())
+    }
+
+    pub async fn list_tasks(&self) -> Result<(), CliError> {
+        let ListTaskResponse {
+            num_slots,
+            used_slots,
+            tasks,
+        } = self.get_json("/tasks/list").await?;
         println!(
-            "{}\t{}\t{}\t{:?}\t{}",
-            task_id,
-            task.label.as_deref().unwrap_or(""),
-            task.log_path.unwrap_or(PathBuf::from("")).display(),
-            task.status,
-            task.command
-        )
-    }
-    Ok(())
-}
-
-pub async fn get_task_info(task_id: u32) -> Result<(), Box<dyn Error>> {
-    let server_host = get_server_host();
-    let client = reqwest::Client::new();
-    let response = client
-        .get(format!("http://{server_host}/tasks/info"))
-        .query(&TaskIdRequest { task_id })
-        .send()
-        .await?;
-    if response.error_for_status_ref().is_err() {
-        return Err(Box::new(CliError(response.json::<ResponseError>().await?)));
-    }
-    let task = response.json::<Task>().await?;
-    println!("Status: {:?}", task.status);
-    if let Some(pid) = task.pid {
-        println!("PID: {}", pid);
-    }
-    if let Some(exit_code) = task.exit_code {
-        println!("Exit code: {}", exit_code);
-    }
-    println!("Command: {}", task.command);
-    if let Some(label) = task.label {
-        println!("Label: {}", label);
-    }
-    println!(
-        "Log path: {}",
-        task.log_path.unwrap_or(PathBuf::from("")).display()
-    );
-    if !task.dependencies.is_empty() {
-        println!(
-            "Dependence: {}",
-            task.dependencies
-                .iter()
-                .map(|(id, _)| id.to_string())
-                .collect::<Vec<String>>()
-                .join(", ")
+            "ID\tLabel\tOutput\tStatus\tCommand ({}/{})",
+            used_slots, num_slots
         );
+        for (task_id, task) in tasks {
+            println!(
+                "{}\t{}\t{}\t{:?}\t{}",
+                task_id,
+                task.label.as_deref().unwrap_or(""),
+                task.log_path.unwrap_or(PathBuf::from("")).display(),
+                task.status,
+                task.command
+            )
+        }
+        Ok(())
     }
-    println!("Create time: {}", task.create_time);
-    if let Some(start_time) = task.start_time {
-        println!("Start time: {}", start_time);
-    }
-    if let Some(end_time) = task.end_time {
-        println!("End time: {}", end_time);
-    }
-    if let (Some(start_time), Some(end_time)) = (task.start_time, task.end_time) {
-        let elapse_time = end_time - start_time;
-        println!("Elapse time: {}", elapse_time);
-    }
-    Ok(())
-}
 
-pub async fn get_task_log(task_id: u32, is_tail: bool) -> Result<(), Box<dyn Error>> {
-    let server_host = get_server_host();
-    let client = reqwest::Client::new();
-    let response = client
-        .get(format!("http://{server_host}/tasks/info"))
-        .query(&TaskIdRequest { task_id })
-        .send()
-        .await?;
-    if response.error_for_status_ref().is_err() {
-        return Err(Box::new(CliError(response.json::<ResponseError>().await?)));
+    pub async fn get_task_info(&self, task_id: u32) -> Result<(), CliError> {
+        let query = TaskIdRequest { task_id };
+        let task: Task = self
+            .get_json(&format!("/tasks/info?task_id={}", query.task_id))
+            .await?;
+        println!("Status: {:?}", task.status);
+        if let Some(pid) = task.pid {
+            println!("PID: {}", pid);
+        }
+        if let Some(exit_code) = task.exit_code {
+            println!("Exit code: {}", exit_code);
+        }
+        println!("Command: {}", task.command);
+        if let Some(label) = task.label {
+            println!("Label: {}", label);
+        }
+        println!(
+            "Log path: {}",
+            task.log_path.unwrap_or(PathBuf::from("")).display()
+        );
+        if !task.dependencies.is_empty() {
+            println!(
+                "Dependence: {}",
+                task.dependencies
+                    .keys()
+                    .map(|id| id.to_string())
+                    .collect::<Vec<String>>()
+                    .join(", ")
+            );
+        }
+        println!("Create time: {}", task.create_time);
+        if let Some(start_time) = task.start_time {
+            println!("Start time: {}", start_time);
+        }
+        if let Some(end_time) = task.end_time {
+            println!("End time: {}", end_time);
+        }
+        if let (Some(start_time), Some(end_time)) = (task.start_time, task.end_time) {
+            let elapse_time = end_time - start_time;
+            println!("Elapse time: {}", elapse_time);
+        }
+        Ok(())
     }
-    let task = response.json::<Task>().await?;
-    if let Some(log_path) = task.log_path {
-        let file = fs::File::open(log_path)?;
-        if !is_tail {
-            // 逐行读取
-            let reader = BufReader::new(file);
-            for line in reader.lines() {
-                println!("{}", line?);
+
+    pub async fn get_task_log(&self, task_id: u32, is_tail: bool) -> Result<(), CliError> {
+        let query = TaskIdRequest { task_id };
+        let task: Task = self
+            .get_json(&format!("/tasks/info?task_id={}", query.task_id))
+            .await?;
+        if let Some(log_path) = task.log_path {
+            let file = fs::File::open(log_path)?;
+            if !is_tail {
+                let reader = BufReader::new(file);
+                for line in reader.lines() {
+                    println!("{}", line?);
+                }
+            } else {
+                let reader = RevBufReader::new(file);
+                for line in
+                    reader
+                        .lines()
+                        .take(10)
+                        .collect::<Result<Vec<_>, _>>()
+                        .map(|mut v| {
+                            v.reverse();
+                            v
+                        })?
+                {
+                    println!("{}", line);
+                }
             }
         } else {
-            let reader = RevBufReader::new(file);
-            for line in reader
-                .lines()
-                .take(10)
-                .collect::<Result<Vec<_>, _>>()
-                .map(|mut v| {
-                    v.reverse();
-                    v
-                })?
-            {
-                println!("{}", line);
+            eprintln!("No log file");
+        }
+        Ok(())
+    }
+
+    pub async fn push_task(
+        &self,
+        label: Option<String>,
+        path: Option<String>,
+        mode: Option<crate::cli::args::DependTaskMode>,
+        command: String,
+    ) -> Result<(), CliError> {
+        let mut not_safely_depends: bool = false;
+        let mut dependencies: Vec<u32> = Vec::new();
+        if let Some(depend_mode) = mode {
+            if let Some(waits) = depend_mode.wait {
+                dependencies = waits;
+            } else if let Some(delays) = depend_mode.delay {
+                not_safely_depends = true;
+                dependencies = delays;
             }
         }
+        let data = PushTaskRequest {
+            label,
+            command,
+            log_path: path.map(PathBuf::from),
+            current_dir: env::current_dir()?,
+            envs: env::vars().collect(),
+            not_safely_depends,
+            dependencies,
+        };
+        self.post_success("/tasks/push", &data).await
+    }
+
+    pub async fn remove_task(&self, task_id: u32, is_all: bool) -> Result<(), CliError> {
+        let data = RemoveTaskRequest { task_id, is_all };
+        self.get_success(&format!(
+            "/tasks/remove?task_id={}&is_all={}",
+            data.task_id, data.is_all
+        ))
+        .await
+    }
+
+    pub async fn kill_task(&self, task_id: u32) -> Result<(), CliError> {
+        self.get_success(&format!("/tasks/kill?task_id={}", task_id))
+            .await
+    }
+
+    pub async fn configure(&self, num_slots: u32) -> Result<(), CliError> {
+        let data = ConfigureRequest { num_slots };
+        self.post_success("/configure", &data).await
+    }
+}
+
+pub async fn handle_do_command(mode: &DoTaskMode, client: &RtsClient) -> Result<(), CliError> {
+    if let Some(id) = mode.info {
+        client.get_task_info(id).await
+    } else if let Some(id) = mode.cat {
+        client.get_task_log(id, false).await
+    } else if let Some(id) = mode.tail {
+        client.get_task_log(id, true).await
+    } else if let Some(id) = mode.remove {
+        client.remove_task(id, false).await
+    } else if mode.clear {
+        client.remove_task(0, true).await
+    } else if let Some(id) = mode.kill {
+        client.kill_task(id).await
     } else {
-        eprintln!("No log file");
+        Ok(())
     }
-    Ok(())
-}
-
-pub async fn push_task(
-    label: Option<String>,
-    path: Option<String>,
-    mode: Option<DependTaskMode>,
-    command: String,
-) -> Result<(), Box<dyn Error>> {
-    let server_host = get_server_host();
-    let mut not_safely_depends: bool = false;
-    let mut dependencies: Vec<u32> = Vec::new();
-    if let Some(depend_mode) = mode {
-        if let Some(waits) = depend_mode.wait {
-            dependencies = waits;
-        } else if let Some(delays) = depend_mode.delay {
-            not_safely_depends = true;
-            dependencies = delays;
-        }
-    }
-    let data = PushTaskRequest {
-        label,
-        command,
-        log_path: path.map(|p| PathBuf::from(p)),
-        current_dir: env::current_dir()?,
-        envs: env::vars().collect(),
-        not_safely_depends,
-        dependencies,
-    };
-    let client = reqwest::Client::new();
-    let response = client
-        .post(format!("http://{server_host}/tasks/push"))
-        .json(&data)
-        .send()
-        .await?;
-    if response.error_for_status_ref().is_err() {
-        return Err(Box::new(CliError(response.json::<ResponseError>().await?)));
-    }
-    Ok(())
-}
-
-pub async fn remove_task(task_id: u32, is_all: bool) -> Result<(), Box<dyn Error>> {
-    let server_host = get_server_host();
-    let data = RemoveTaskRequest { task_id, is_all };
-    let client = reqwest::Client::new();
-    let response = client
-        .get(format!("http://{server_host}/tasks/remove"))
-        .query(&data)
-        .send()
-        .await?;
-    if response.error_for_status_ref().is_err() {
-        return Err(Box::new(CliError(response.json::<ResponseError>().await?)));
-    }
-    Ok(())
-}
-
-pub async fn kill_task(task_id: u32) -> Result<(), Box<dyn Error>> {
-    let server_host = get_server_host();
-    let data = TaskIdRequest { task_id };
-    let client = reqwest::Client::new();
-    let response = client
-        .get(format!("http://{server_host}/tasks/kill"))
-        .query(&data)
-        .send()
-        .await?;
-    if response.error_for_status_ref().is_err() {
-        return Err(Box::new(CliError(response.json::<ResponseError>().await?)));
-    }
-    Ok(())
-}
-
-pub async fn configure(num_slots: u32) -> Result<(), Box<dyn Error>> {
-    let server_host = get_server_host();
-    let mut data = HashMap::new();
-    data.insert("num_slots", num_slots);
-    let client = reqwest::Client::new();
-    let response = client
-        .post(format!("http://{server_host}/configure"))
-        .json(&data)
-        .send()
-        .await?;
-    if response.error_for_status_ref().is_err() {
-        return Err(Box::new(CliError(response.json::<ResponseError>().await?)));
-    }
-    Ok(())
 }

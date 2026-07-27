@@ -15,7 +15,7 @@ pub struct PushTaskRequest {
     pub dependencies: Vec<u32>,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct ConfigureRequest {
     pub num_slots: u32,
 }

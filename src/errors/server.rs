@@ -46,8 +46,33 @@ impl From<serde_json::Error> for ServerError {
 
 impl fmt::Display for ServerError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "ServerError: {}", self.to_string())
+        match self {
+            ServerError::InvalidJson(msg) => write!(f, "ServerError: Invalid JSON: {}", msg),
+            ServerError::InternalError(msg) => write!(f, "ServerError: Internal error: {}", msg),
+            ServerError::InvalidParams(msg) => write!(f, "ServerError: Invalid params: {}", msg),
+        }
     }
 }
 
 impl Error for ServerError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_display_no_panic() {
+        // Regression test: ensure Display doesn't recurse infinitely
+        let err = ServerError::InternalError("test error".into());
+        let msg = format!("{}", err);
+        assert_eq!(msg, "ServerError: Internal error: test error");
+
+        let err = ServerError::InvalidJson("bad json".into());
+        let msg = format!("{}", err);
+        assert_eq!(msg, "ServerError: Invalid JSON: bad json");
+
+        let err = ServerError::InvalidParams("invalid".into());
+        let msg = format!("{}", err);
+        assert_eq!(msg, "ServerError: Invalid params: invalid");
+    }
+}

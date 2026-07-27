@@ -19,7 +19,7 @@ impl ServerState {
             used_slots: Mutex::new(0),
             task_id_counter: Mutex::new(0),
             tasks: Mutex::new(BTreeMap::new()),
-            tx: tx,
+            tx,
         }
     }
 
@@ -30,7 +30,7 @@ impl ServerState {
             *old_num_slots = num_slots;
             let tx = &self.tx;
             tx.send(ChannelMessage {
-                task_id: Some(TaskId::New),
+                task_id: None,
                 task_action: TaskAction::Run,
             })
             .map_err(|e| ServerError::InternalError(e.to_string()))?;
@@ -48,7 +48,7 @@ impl ServerState {
         // 由于 state.tasks 是 BTreeMap，所以各 task 默认是按创建时间排序的
         let mut tasks = self.tasks.lock().await;
         // 验证 dependence_ids 有效性
-        if tasks.iter().any(|(id, _)| tasks.get(id).is_none()) {
+        if dependence_ids.iter().any(|id| !tasks.contains_key(id)) {
             return Err(ServerError::InvalidParams(
                 "Invalid dependence task IDs".into(),
             ));
@@ -70,7 +70,7 @@ impl ServerState {
 
         let tx = &self.tx;
         tx.send(ChannelMessage {
-            task_id: Some(TaskId::New),
+            task_id: None,
             task_action: TaskAction::Run,
         })
         .map_err(|e| ServerError::InternalError(e.to_string()))
@@ -107,12 +107,6 @@ pub enum TaskStatus {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TaskId {
-    Old(u32),
-    New,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TaskAction {
     Run,
     Complete,
@@ -122,6 +116,6 @@ pub enum TaskAction {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ChannelMessage {
-    pub task_id: Option<TaskId>,
+    pub task_id: Option<u32>,
     pub task_action: TaskAction,
 }
