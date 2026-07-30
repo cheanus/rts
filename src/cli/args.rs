@@ -33,6 +33,12 @@ pub enum Commands {
         /// The command to execute
         #[arg(required = true, allow_hyphen_values = true)]
         command: Vec<String>,
+        /// 请求 N 张 GPU
+        #[arg(short = 'G', value_name = "N")]
+        gpu: Option<u32>,
+        /// 每张 GPU 所需最低空闲显存（GB），须配合 -G 使用
+        #[arg(short = 'm', value_name = "GB")]
+        gpu_mem: Option<f64>,
     },
 
     /// List tasks
@@ -47,9 +53,15 @@ pub enum Commands {
 
     /// Configure the RTS server
     Config {
-        /// Get/set the number of max simultaneous jobs
+        /// 设置最大并行任务数
         #[arg(short = 'S')]
-        num_slots: u32,
+        num_slots: Option<u32>,
+        /// 设置可管理的 GPU 索引（逗号分隔），如 -G 0,1
+        #[arg(short = 'G', value_delimiter = ',', value_name = "IDS")]
+        gpu_ids: Option<Vec<u32>>,
+        /// 设置 GPU 空闲显存阈值（0.0 ~ 1.0），默认 0.98
+        #[arg(short = 'T', value_name = "THRESHOLD")]
+        gpu_threshold: Option<f64>,
     },
 }
 

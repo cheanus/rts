@@ -27,10 +27,12 @@ async fn main() {
             path,
             mode,
             command,
+            gpu,
+            gpu_mem,
         } => {
             let client = RtsClient::new();
             client
-                .push_task(label, path, mode, command.join(" "))
+                .push_task(label, path, mode, command.join(" "), gpu, gpu_mem)
                 .await
                 .unwrap_or_else(|e| eprintln!("Cannot push task: {}", e))
         }
@@ -47,10 +49,14 @@ async fn main() {
                 .await
                 .unwrap_or_else(|e| eprintln!("Command failed: {}", e))
         }
-        cli::args::Commands::Config { num_slots } => {
+        cli::args::Commands::Config {
+            num_slots,
+            gpu_ids,
+            gpu_threshold,
+        } => {
             let client = RtsClient::new();
             client
-                .configure(num_slots)
+                .configure(num_slots, gpu_ids, gpu_threshold)
                 .await
                 .unwrap_or_else(|e| eprintln!("Cannot configure: {}", e))
         }

@@ -12,6 +12,7 @@ pub enum CliError {
     Io(std::io::Error),
     Json(serde_json::Error),
     Env(std::env::VarError),
+    InvalidParams(String),
 }
 
 impl fmt::Display for CliError {
@@ -24,6 +25,7 @@ impl fmt::Display for CliError {
             CliError::Io(e) => write!(f, "IO error: {}", e),
             CliError::Json(e) => write!(f, "JSON error: {}", e),
             CliError::Env(e) => write!(f, "Env error: {}", e),
+            CliError::InvalidParams(msg) => write!(f, "Invalid params: {}", msg),
         }
     }
 }

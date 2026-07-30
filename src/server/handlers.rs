@@ -2,7 +2,7 @@ use crate::errors::ServerError;
 use crate::server::scheme::{
     ConfigureRequest, ListTaskResponse, PushTaskRequest, RemoveTaskRequest, TaskIdRequest,
 };
-use crate::server::state::{ServerState, Task, TaskStatus};
+use crate::server::state::{ChannelMessage, ServerState, Task, TaskAction, TaskStatus};
 use axum::Json;
 use axum::extract::{Query, State};
 use chrono::Local;
@@ -15,6 +15,26 @@ pub async fn push_task(
     Json(request): Json<PushTaskRequest>,
 ) -> Result<(), ServerError> {
     let log_path = request.log_path;
+    // 验证 GPU 需求
+    if let Some(gpu_req) = &request.gpu_requirement {
+        if gpu_req.count == 0 {
+            return Err(ServerError::InvalidParams("GPU count must be > 0".into()));
+        }
+        let gpu_infos_empty = state.gpu_infos.is_empty();
+        if gpu_infos_empty {
+            return Err(ServerError::InvalidParams(
+                "No GPU available on this server".into(),
+            ));
+        }
+        let pool = state.gpu_ids.lock().await;
+        if gpu_req.count > pool.len() as u32 {
+            return Err(ServerError::InvalidParams(format!(
+                "Requested {} GPUs but only {} in pool",
+                gpu_req.count,
+                pool.len()
+            )));
+        }
+    }
     let task = Task {
         label: request.label,
         status: TaskStatus::Pending,
@@ -24,6 +44,7 @@ pub async fn push_task(
         envs: request.envs,
         create_time: Local::now(),
         not_safely_depends: request.not_safely_depends,
+        gpu_requirement: request.gpu_requirement,
         ..Default::default()
     };
     state.push_task(task, &request.dependencies).await
@@ -107,10 +128,14 @@ pub async fn list_tasks(State(state): State<Arc<ServerState>>) -> Json<ListTaskR
     let tasks_snapshot = { state.tasks.lock().await.clone() };
     let num_slots = *state.num_slots.lock().await;
     let used_slots = *state.used_slots.lock().await;
+    let gpu_ids = state.gpu_ids.lock().await.clone();
+    let gpu_allocations = state.gpu_allocations.lock().await.clone();
     let list_tasks_json = ListTaskResponse {
         num_slots,
         used_slots,
         tasks: tasks_snapshot,
+        gpu_ids,
+        gpu_allocations,
     };
     Json(list_tasks_json)
 }
@@ -119,15 +144,49 @@ pub async fn configure(
     State(state): State<Arc<ServerState>>,
     Json(request): Json<ConfigureRequest>,
 ) -> Result<(), ServerError> {
-    let num_slots = request.num_slots;
-    state.set_num_slots(num_slots).await
+    let mut sent = false;
+    if let Some(num_slots) = request.num_slots {
+        state.set_num_slots(num_slots).await?;
+        sent = true;
+    }
+    if let Some(ref gpu_ids) = request.gpu_ids {
+        let max_index = state.gpu_infos.last().map(|g| g.index).unwrap_or(0);
+        if gpu_ids.iter().any(|id| *id > max_index) {
+            return Err(ServerError::InvalidParams("GPU ID out of range".into()));
+        }
+        // 释放不再属于池的 GPU 上的分配
+        let mut gpu_allocations = state.gpu_allocations.lock().await;
+        gpu_allocations.retain(|_, assigned| assigned.iter().all(|idx| gpu_ids.contains(idx)));
+        *state.gpu_ids.lock().await = gpu_ids.clone();
+        sent = true;
+    }
+    if let Some(threshold) = request.gpu_threshold {
+        if !(0.0..=1.0).contains(&threshold) {
+            return Err(ServerError::InvalidParams(
+                "GPU threshold must be between 0.0 and 1.0".into(),
+            ));
+        }
+        *state.gpu_mem_threshold.lock().await = threshold;
+        sent = true;
+    }
+    // 配置变更后触发调度
+    if sent {
+        state
+            .tx
+            .send(ChannelMessage {
+                task_id: None,
+                task_action: TaskAction::Run,
+            })
+            .map_err(|e| ServerError::InternalError(e.to_string()))?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     mod push_tests {
         use super::super::*;
-        use crate::server::state::{ChannelMessage, TaskAction};
+        use crate::server::state::{ChannelMessage, GpuRequirement, TaskAction};
         use std::collections::HashMap;
         use std::error::Error;
         use std::path::PathBuf;
@@ -140,7 +199,7 @@ mod tests {
                 task_id: None,
                 task_action: TaskAction::Complete,
             });
-            let state = Arc::new(ServerState::new(1, tx));
+            let state = Arc::new(ServerState::new(1, None, vec![], tx));
             let request = PushTaskRequest {
                 label: Some("test".to_string()),
                 command: "echo hi".to_string(),
@@ -149,6 +208,7 @@ mod tests {
                 envs: HashMap::from([("PYTHONPATH".to_string(), "/".to_string())]),
                 not_safely_depends: false,
                 dependencies: Vec::new(),
+                gpu_requirement: None,
             };
             push_task(State(Arc::clone(&state)), Json(request.clone())).await?;
             {
@@ -182,7 +242,7 @@ mod tests {
                 task_id: None,
                 task_action: TaskAction::Complete,
             });
-            let state = Arc::new(ServerState::new(1, tx));
+            let state = Arc::new(ServerState::new(1, None, vec![], tx));
             // Request with a dependency ID that doesn't exist (999)
             let request = PushTaskRequest {
                 label: None,
@@ -192,12 +252,44 @@ mod tests {
                 envs: HashMap::new(),
                 not_safely_depends: false,
                 dependencies: vec![999],
+                gpu_requirement: None,
             };
             let result = push_task(State(Arc::clone(&state)), Json(request)).await;
             assert!(result.is_err());
             match result {
                 Err(ServerError::InvalidParams(msg)) => {
                     assert_eq!(msg, "Invalid dependence task IDs");
+                }
+                _ => panic!("Expected ServerError::InvalidParams"),
+            }
+            Ok(())
+        }
+
+        #[tokio::test]
+        async fn test_push_task_gpu_no_gpu_available() -> Result<(), Box<dyn Error>> {
+            let (tx, _rx) = watch::channel(ChannelMessage {
+                task_id: None,
+                task_action: TaskAction::Complete,
+            });
+            let state = Arc::new(ServerState::new(1, None, vec![], tx));
+            let request = PushTaskRequest {
+                label: None,
+                command: "echo hi".to_string(),
+                log_path: None,
+                current_dir: PathBuf::from_str("/")?,
+                envs: HashMap::new(),
+                not_safely_depends: false,
+                dependencies: Vec::new(),
+                gpu_requirement: Some(GpuRequirement {
+                    count: 1,
+                    min_free_mem_bytes: None,
+                }),
+            };
+            let result = push_task(State(Arc::clone(&state)), Json(request)).await;
+            assert!(result.is_err());
+            match result {
+                Err(ServerError::InvalidParams(msg)) => {
+                    assert_eq!(msg, "No GPU available on this server");
                 }
                 _ => panic!("Expected ServerError::InvalidParams"),
             }
@@ -217,7 +309,7 @@ mod tests {
                 task_id: None,
                 task_action: TaskAction::Complete,
             });
-            let state = Arc::new(ServerState::new(1, tx));
+            let state = Arc::new(ServerState::new(1, None, vec![], tx));
             {
                 let task = Task {
                     status: TaskStatus::Running,
@@ -245,7 +337,7 @@ mod tests {
                 task_id: None,
                 task_action: TaskAction::Complete,
             });
-            let state = Arc::new(ServerState::new(1, tx));
+            let state = Arc::new(ServerState::new(1, None, vec![], tx));
             {
                 let task = Task {
                     status: TaskStatus::Completed,
@@ -273,7 +365,7 @@ mod tests {
                 task_id: None,
                 task_action: TaskAction::Complete,
             });
-            let state = Arc::new(ServerState::new(1, tx));
+            let state = Arc::new(ServerState::new(1, None, vec![], tx));
             {
                 let mut tasks = state.tasks.lock().await;
                 tasks.insert(
@@ -323,7 +415,7 @@ mod tests {
                 task_id: None,
                 task_action: TaskAction::Complete,
             });
-            let state = Arc::new(ServerState::new(1, tx));
+            let state = Arc::new(ServerState::new(1, None, vec![], tx));
             let task = Task {
                 status: TaskStatus::Running,
                 command: "echo hi".into(),
@@ -354,7 +446,7 @@ mod tests {
                 task_id: None,
                 task_action: TaskAction::Complete,
             });
-            let state = Arc::new(ServerState::new(1, tx));
+            let state = Arc::new(ServerState::new(1, None, vec![], tx));
             let mut child = process::Command::new("sh")
                 .arg("-c")
                 .arg("sleep 10")
@@ -390,7 +482,7 @@ mod tests {
                 task_id: None,
                 task_action: TaskAction::Complete,
             });
-            let state = Arc::new(ServerState::new(1, tx));
+            let state = Arc::new(ServerState::new(1, None, vec![], tx));
             let mut tasks = BTreeMap::new();
             tasks.insert(
                 0,
@@ -431,8 +523,12 @@ mod tests {
                 task_id: None,
                 task_action: TaskAction::Complete,
             });
-            let state = Arc::new(ServerState::new(1, tx));
-            let request = ConfigureRequest { num_slots: 2 };
+            let state = Arc::new(ServerState::new(1, None, vec![], tx));
+            let request = ConfigureRequest {
+                num_slots: Some(2),
+                gpu_ids: None,
+                gpu_threshold: None,
+            };
             configure(State(Arc::clone(&state)), Json(request)).await?;
             assert_eq!(*state.num_slots.lock().await, 2);
             rx.changed().await?;

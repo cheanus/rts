@@ -13,11 +13,14 @@ pub struct PushTaskRequest {
     pub envs: HashMap<String, String>,
     pub not_safely_depends: bool,
     pub dependencies: Vec<u32>,
+    pub gpu_requirement: Option<crate::server::state::GpuRequirement>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct ConfigureRequest {
-    pub num_slots: u32,
+    pub num_slots: Option<u32>,
+    pub gpu_ids: Option<Vec<u32>>,
+    pub gpu_threshold: Option<f64>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -25,6 +28,8 @@ pub struct ListTaskResponse {
     pub num_slots: u32,
     pub used_slots: u32,
     pub tasks: BTreeMap<u32, Task>,
+    pub gpu_ids: Vec<u32>,
+    pub gpu_allocations: HashMap<u32, Vec<u32>>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]

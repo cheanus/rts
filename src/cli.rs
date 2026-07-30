@@ -111,7 +111,31 @@ impl RtsClient {
             num_slots,
             used_slots,
             tasks,
+            gpu_ids,
+            gpu_allocations,
         } = self.get_json("/tasks/list").await?;
+        if !gpu_ids.is_empty() {
+            println!(
+                "GPU pool: [{}]",
+                gpu_ids
+                    .iter()
+                    .map(|id| id.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        }
+        if !gpu_allocations.is_empty() {
+            for (&task_id, gpus) in &gpu_allocations {
+                println!(
+                    "  task#{} → GPU [{}]",
+                    task_id,
+                    gpus.iter()
+                        .map(|i| i.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+            }
+        }
         println!(
             "ID\tLabel\tOutput\tStatus\tCommand ({}/{})",
             used_slots, num_slots
@@ -212,6 +236,8 @@ impl RtsClient {
         path: Option<String>,
         mode: Option<crate::cli::args::DependTaskMode>,
         command: String,
+        gpu: Option<u32>,
+        gpu_mem: Option<f64>,
     ) -> Result<(), CliError> {
         let mut not_safely_depends: bool = false;
         let mut dependencies: Vec<u32> = Vec::new();
@@ -223,6 +249,16 @@ impl RtsClient {
                 dependencies = delays;
             }
         }
+        // 验证 -m 必须配合 -G 使用
+        if gpu_mem.is_some() && gpu.is_none() {
+            return Err(CliError::InvalidParams(
+                "[-m] must be used with [-G]".into(),
+            ));
+        }
+        let gpu_requirement = gpu.map(|count| crate::server::state::GpuRequirement {
+            count,
+            min_free_mem_bytes: gpu_mem.map(|gb| (gb * 1_073_741_824.0) as u64),
+        });
         let data = PushTaskRequest {
             label,
             command,
@@ -231,6 +267,7 @@ impl RtsClient {
             envs: env::vars().collect(),
             not_safely_depends,
             dependencies,
+            gpu_requirement,
         };
         self.post_success("/tasks/push", &data).await
     }
@@ -249,8 +286,17 @@ impl RtsClient {
             .await
     }
 
-    pub async fn configure(&self, num_slots: u32) -> Result<(), CliError> {
-        let data = ConfigureRequest { num_slots };
+    pub async fn configure(
+        &self,
+        num_slots: Option<u32>,
+        gpu_ids: Option<Vec<u32>>,
+        gpu_threshold: Option<f64>,
+    ) -> Result<(), CliError> {
+        let data = ConfigureRequest {
+            num_slots,
+            gpu_ids,
+            gpu_threshold,
+        };
         self.post_success("/configure", &data).await
     }
 }

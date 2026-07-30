@@ -1,7 +1,8 @@
+use super::gpu;
 use super::state::{ChannelMessage, ServerState, Task, TaskAction, TaskStatus};
 use crate::errors::ServerError;
 use chrono::Local;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::error::Error;
 use std::fs::{self, File};
 use std::path::PathBuf;
@@ -123,20 +124,21 @@ async fn try_create_tasks(
     num_slots: u32,
     mut tasks: MutexGuard<'_, BTreeMap<u32, Task>>,
     tx: &Sender<ChannelMessage>,
+    state: &Arc<ServerState>,
 ) {
     for (task_id, task) in tasks.iter_mut() {
-        try_create_task(&mut used_slots, num_slots, *task_id, task, tx).await;
+        try_create_task(&mut used_slots, num_slots, *task_id, task, tx, state).await;
     }
 }
-
 async fn try_create_task(
     used_slots: &mut MutexGuard<'_, u32>,
     num_slots: u32,
     task_id: u32,
     task: &mut Task,
     tx: &Sender<ChannelMessage>,
+    state: &Arc<ServerState>,
 ) {
-    // 槽位满则 break
+    // 槽位满则 return
     if **used_slots >= num_slots {
         return;
     }
@@ -150,6 +152,53 @@ async fn try_create_task(
             if !is_dependence_over {
                 return;
             }
+        }
+        // GPU 资源检查
+        let mut assigned_gpus: Vec<u32> = Vec::new();
+        if let Some(gpu_req) = &task.gpu_requirement {
+            let Some(nvml) = &state.nvml else {
+                return; // NVML 未初始化，GPU 任务无法运行
+            };
+            let pool = state.gpu_ids.lock().await.clone();
+            let mut gpu_allocations = state.gpu_allocations.lock().await;
+            let threshold = *state.gpu_mem_threshold.lock().await;
+            // 收集已分配的 GPU 索引
+            let allocated: HashSet<u32> = gpu_allocations.values().flatten().copied().collect();
+            // 查询空闲显存
+            let free_mem = gpu::query_gpu_free_memory(nvml, &pool);
+            // 找到满足条件的未分配 GPU（最先匹配）
+            for gpu_info in &state.gpu_infos {
+                if !pool.contains(&gpu_info.index) {
+                    continue;
+                }
+                if allocated.contains(&gpu_info.index) {
+                    continue;
+                }
+                let free = free_mem.get(&gpu_info.index).copied().unwrap_or(0);
+                let required = match gpu_req.min_free_mem_bytes {
+                    Some(bytes) => bytes,
+                    None => (gpu_info.total_memory_bytes as f64 * threshold) as u64,
+                };
+                if free >= required {
+                    assigned_gpus.push(gpu_info.index);
+                }
+            }
+            if (assigned_gpus.len() as u32) < gpu_req.count {
+                return; // GPU 资源不足，保持 Pending
+            }
+            // 只取需要的数量
+            assigned_gpus.truncate(gpu_req.count as usize);
+            gpu_allocations.insert(task_id, assigned_gpus.clone());
+            drop(gpu_allocations);
+            // 注入 CUDA_VISIBLE_DEVICES
+            task.envs.insert(
+                "CUDA_VISIBLE_DEVICES".to_string(),
+                assigned_gpus
+                    .iter()
+                    .map(|i| i.to_string())
+                    .collect::<Vec<_>>()
+                    .join(","),
+            );
         }
         **used_slots += 1;
         task.status = TaskStatus::Running;
@@ -189,7 +238,7 @@ pub async fn rx_worker(
             None => {
                 // 尝试添加、运行新任务
                 if task_action == TaskAction::Run {
-                    try_create_tasks(used_slots, num_slots, tasks, &tx).await;
+                    try_create_tasks(used_slots, num_slots, tasks, &tx, &state).await;
                 }
             }
             Some(task_id) => {
@@ -222,8 +271,11 @@ pub async fn rx_worker(
 
                 *used_slots -= 1;
 
+                // 释放 GPU 分配
+                state.gpu_allocations.lock().await.remove(&task_id);
+
                 update_required_status(task_id, status, &required, &mut tasks);
-                try_create_tasks(used_slots, num_slots, tasks, &tx).await;
+                try_create_tasks(used_slots, num_slots, tasks, &tx, &state).await;
             }
         }
     }
@@ -288,7 +340,7 @@ mod tests {
             task_action: TaskAction::Complete,
         });
         // 创建全局 state
-        let server_state = ServerState::new(num_slots, tx.clone());
+        let server_state = ServerState::new(num_slots, None, vec![], tx.clone());
         let state = Arc::new(server_state);
         let state_clone = Arc::clone(&state);
 

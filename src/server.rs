@@ -1,3 +1,4 @@
+pub mod gpu;
 mod handlers;
 pub mod scheme;
 pub mod state;
@@ -8,15 +9,27 @@ use state::{ChannelMessage, ServerState, TaskAction};
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::watch;
-
 pub async fn server(server_host: String) {
+    // NVML 初始化 + GPU 发现
+    let (nvml, gpu_infos) = match nvml_wrapper::Nvml::init() {
+        Ok(nvml) => {
+            let infos = gpu::discover_gpus(&nvml);
+            println!("Discovered {} GPU(s)", infos.len());
+            (Some(nvml), infos)
+        }
+        Err(e) => {
+            eprintln!("NVML init failed (no NVIDIA GPU?): {}", e);
+            (None, vec![])
+        }
+    };
+
     // 用 watch channel 传递进程状态
     let (tx, rx) = watch::channel(ChannelMessage {
         task_id: None,
         task_action: TaskAction::Complete,
     });
 
-    let state = Arc::new(ServerState::new(1, tx.clone()));
+    let state = Arc::new(ServerState::new(1, nvml, gpu_infos, tx.clone()));
 
     // 创建 rx 处理线程
     let rx_worker_fut = workers::rx_worker(tx, rx, Arc::clone(&state));
