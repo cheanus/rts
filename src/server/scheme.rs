@@ -29,7 +29,7 @@ pub struct ListTaskResponse {
     pub used_slots: u32,
     pub tasks: BTreeMap<u32, Task>,
     pub gpu_ids: Vec<u32>,
-    pub gpu_allocations: HashMap<u32, Vec<u32>>,
+    pub gpu_allocations: HashMap<u32, Vec<(u32, u64)>>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]

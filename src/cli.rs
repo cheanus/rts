@@ -130,7 +130,7 @@ impl RtsClient {
                     "  task#{} → GPU [{}]",
                     task_id,
                     gpus.iter()
-                        .map(|i| i.to_string())
+                        .map(|(idx, _)| idx.to_string())
                         .collect::<Vec<_>>()
                         .join(", ")
                 );

@@ -28,7 +28,7 @@ pub struct ServerState {
     pub nvml: Option<nvml_wrapper::Nvml>,
     pub gpu_infos: Vec<GpuInfo>,
     pub gpu_ids: Mutex<Vec<u32>>,
-    pub gpu_allocations: Mutex<HashMap<u32, Vec<u32>>>,
+    pub gpu_allocations: Mutex<HashMap<u32, Vec<(u32, u64)>>>,
     pub gpu_mem_threshold: Mutex<f64>,
 }
 

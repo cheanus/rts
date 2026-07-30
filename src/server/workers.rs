@@ -2,7 +2,7 @@ use super::gpu;
 use super::state::{ChannelMessage, ServerState, Task, TaskAction, TaskStatus};
 use crate::errors::ServerError;
 use chrono::Local;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::error::Error;
 use std::fs::{self, File};
 use std::path::PathBuf;
@@ -14,6 +14,7 @@ use tokio::sync::{
     MutexGuard,
     watch::{Receiver, Sender},
 };
+use tokio::time::{self, Duration};
 
 fn send_task_action(tx: &Sender<ChannelMessage>, task_id: u32, task_action: TaskAction) {
     let _ = tx.send(ChannelMessage {
@@ -153,7 +154,7 @@ async fn try_create_task(
                 return;
             }
         }
-        // GPU 资源检查
+        // GPU 资源检查（共享分配模式）
         let mut assigned_gpus: Vec<u32> = Vec::new();
         if let Some(gpu_req) = &task.gpu_requirement {
             let Some(nvml) = &state.nvml else {
@@ -162,24 +163,33 @@ async fn try_create_task(
             let pool = state.gpu_ids.lock().await.clone();
             let mut gpu_allocations = state.gpu_allocations.lock().await;
             let threshold = *state.gpu_mem_threshold.lock().await;
-            // 收集已分配的 GPU 索引
-            let allocated: HashSet<u32> = gpu_allocations.values().flatten().copied().collect();
             // 查询空闲显存
             let free_mem = gpu::query_gpu_free_memory(nvml, &pool);
-            // 找到满足条件的未分配 GPU（最先匹配）
+            // 找到满足共享条件的 GPU（允许同一 GPU 运行多个任务）
             for gpu_info in &state.gpu_infos {
                 if !pool.contains(&gpu_info.index) {
                     continue;
                 }
-                if allocated.contains(&gpu_info.index) {
-                    continue;
+                // 累加此 GPU 上所有运行中任务的预留显存
+                let mut reserved_on_gpu: u64 = 0;
+                for (_tid, gpu_list) in gpu_allocations.iter() {
+                    for (gpu_idx, reserved) in gpu_list.iter() {
+                        if *gpu_idx == gpu_info.index {
+                            reserved_on_gpu += *reserved;
+                        }
+                    }
                 }
-                let free = free_mem.get(&gpu_info.index).copied().unwrap_or(0);
+                // 查询 NVML 实际空闲
+                let nvml_free = free_mem.get(&gpu_info.index).copied().unwrap_or(0);
+                let nvml_used = gpu_info.total_memory_bytes.saturating_sub(nvml_free);
+                // effective_used = max(NVML 实际已用, 所有任务预留之和)
+                let effective_used = nvml_used.max(reserved_on_gpu);
+                let available = gpu_info.total_memory_bytes.saturating_sub(effective_used);
                 let required = match gpu_req.min_free_mem_bytes {
                     Some(bytes) => bytes,
                     None => (gpu_info.total_memory_bytes as f64 * threshold) as u64,
                 };
-                if free >= required {
+                if available >= required {
                     assigned_gpus.push(gpu_info.index);
                 }
             }
@@ -188,7 +198,23 @@ async fn try_create_task(
             }
             // 只取需要的数量
             assigned_gpus.truncate(gpu_req.count as usize);
-            gpu_allocations.insert(task_id, assigned_gpus.clone());
+            // 计算预留值（每张 GPU 为该任务预留的内存量）
+            let per_gpu_reserved = match gpu_req.min_free_mem_bytes {
+                Some(bytes) => bytes,
+                None => state
+                    .gpu_infos
+                    .iter()
+                    .find(|g| g.index == assigned_gpus[0])
+                    .map(|g| (g.total_memory_bytes as f64 * threshold) as u64)
+                    .unwrap_or(0),
+            };
+            gpu_allocations.insert(
+                task_id,
+                assigned_gpus
+                    .iter()
+                    .map(|idx| (*idx, per_gpu_reserved))
+                    .collect(),
+            );
             drop(gpu_allocations);
             // 注入 CUDA_VISIBLE_DEVICES
             task.envs.insert(
@@ -225,57 +251,82 @@ pub async fn rx_worker(
     mut rx: Receiver<ChannelMessage>,
     state: Arc<ServerState>,
 ) -> Result<(), std::io::Error> {
-    while rx.changed().await.is_ok() {
-        let ChannelMessage {
-            task_id,
-            task_action,
-        } = *rx.borrow();
+    let mut tick = time::interval(Duration::from_secs(5));
+    loop {
+        tokio::select! {
+            biased;
+            result = rx.changed() => {
+                if result.is_err() {
+                    break;
+                }
+                let ChannelMessage {
+                    task_id,
+                    task_action,
+                } = *rx.borrow();
 
-        let mut tasks = state.tasks.lock().await;
-        let num_slots = *state.num_slots.lock().await;
-        let mut used_slots = state.used_slots.lock().await;
-        match task_id {
-            None => {
-                // 尝试添加、运行新任务
-                if task_action == TaskAction::Run {
-                    try_create_tasks(used_slots, num_slots, tasks, &tx, &state).await;
+                let mut tasks = state.tasks.lock().await;
+                let num_slots = *state.num_slots.lock().await;
+                let mut used_slots = state.used_slots.lock().await;
+                match task_id {
+                    None => {
+                        if task_action == TaskAction::Run {
+                            try_create_tasks(used_slots, num_slots, tasks, &tx, &state).await;
+                        }
+                    }
+                    Some(task_id) => {
+                        let Some(task) = tasks.get_mut(&task_id) else {
+                            eprintln!("Cannot find task with ID {}", task_id);
+                            continue;
+                        };
+                        match task_action {
+                            TaskAction::Complete => {
+                                task.status = TaskStatus::Completed;
+                                task.exit_code = Some(0);
+                            }
+                            TaskAction::Fail(code) => {
+                                task.status = TaskStatus::Failed;
+                                task.exit_code = Some(code);
+                            }
+                            TaskAction::Kill => {
+                                task.status = TaskStatus::Killed;
+                                task.exit_code = Some(1);
+                            }
+                            TaskAction::Run => {
+                                eprintln!("Cannot start given task {}", task_id);
+                                continue;
+                            }
+                        }
+                        task.end_time = Some(Local::now());
+                        let status = task.status;
+                        let required = task.required.clone();
+
+                        *used_slots -= 1;
+
+                        // 释放 GPU 分配
+                        state.gpu_allocations.lock().await.remove(&task_id);
+
+                        update_required_status(task_id, status, &required, &mut tasks);
+                        try_create_tasks(used_slots, num_slots, tasks, &tx, &state).await;
+                    }
                 }
             }
-            Some(task_id) => {
-                // 更新结束或失败任务的状态
-                let Some(task) = tasks.get_mut(&task_id) else {
-                    eprintln!("Cannot find task with ID {}", task_id);
+            _ = tick.tick() => {
+                if state.gpu_infos.is_empty() {
                     continue;
-                };
-                match task_action {
-                    TaskAction::Complete => {
-                        task.status = TaskStatus::Completed;
-                        task.exit_code = Some(0);
-                    }
-                    TaskAction::Fail(code) => {
-                        task.status = TaskStatus::Failed;
-                        task.exit_code = Some(code);
-                    }
-                    TaskAction::Kill => {
-                        task.status = TaskStatus::Killed;
-                        task.exit_code = Some(1);
-                    }
-                    TaskAction::Run => {
-                        eprintln!("Cannot start given task {}", task_id);
-                        continue;
-                    }
                 }
-                task.end_time = Some(Local::now());
-                let status = task.status;
-                let required = task.required.clone();
-
-                *used_slots -= 1;
-
-                // 释放 GPU 分配
-                state.gpu_allocations.lock().await.remove(&task_id);
-
-                update_required_status(task_id, status, &required, &mut tasks);
-                try_create_tasks(used_slots, num_slots, tasks, &tx, &state).await;
+                // 检查是否有 pending GPU 任务，有则触发调度
+                let has_pending_gpu = {
+                    let tasks = state.tasks.lock().await;
+                    tasks.values().any(|t| {
+                        t.status == TaskStatus::Pending && t.gpu_requirement.is_some()
+                    })
+                };
+                if has_pending_gpu {
+                    let _ = tx.send(ChannelMessage {
+                        task_id: None,
+                        task_action: TaskAction::Run,
+                    });
+                }
             }
         }
     }

@@ -156,7 +156,7 @@ pub async fn configure(
         }
         // 释放不再属于池的 GPU 上的分配
         let mut gpu_allocations = state.gpu_allocations.lock().await;
-        gpu_allocations.retain(|_, assigned| assigned.iter().all(|idx| gpu_ids.contains(idx)));
+        gpu_allocations.retain(|_, assigned| assigned.iter().all(|(idx, _)| gpu_ids.contains(idx)));
         *state.gpu_ids.lock().await = gpu_ids.clone();
         sent = true;
     }
