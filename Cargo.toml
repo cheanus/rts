@@ -8,9 +8,19 @@ axum = "0.8"
 chrono = {version = "0.4", features = ["serde"] }
 clap = { version = "4.6", features = ["derive"] }
 nix = { version = "0.31.3", features = ["signal"] }
-reqwest = {version = "0.13", features = ["json", "query"]}
+reqwest = {version = "0.13", default-features = false, features = ["json", "query"]}
 serde = { version = "1", features = ["derive"] }
 serde_json = "1.0"
 tempfile = "3"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "fs", "io-util", "time"] }
 nvml-wrapper = "0.12"
+
+[profile.release]
+# 体积优先：代码优化目标设为尺寸（兼顾性能）
+opt-level = "s"
+# 跨 crate LTO，允许消除未被使用的泛型/内联代码
+lto = "fat"
+# 单一 codegen 单元，配合 LTO 做更激进的全局裁剪
+codegen-units = 1
+# 去除符号表与调试信息
+strip = true

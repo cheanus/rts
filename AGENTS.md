@@ -67,7 +67,7 @@
 | Action | Command |
 |--------|---------|
 | Build | `cargo build` |
-| Build release | `cargo build --release` |
+| Build release | `cargo build --release` (体积优化，见 `Cargo.toml` `[profile.release]`: `opt-level="s"` + `lto` + `strip`) |
 | Run all tests | `cargo test` |
 | Run specific test | `cargo test test_push_task` |
 | Lint (clippy) | `cargo clippy` |
