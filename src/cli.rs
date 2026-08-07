@@ -5,12 +5,10 @@ use crate::errors::CliError;
 use crate::server::scheme::{
     ConfigureRequest, ListTaskResponse, PushTaskRequest, RemoveTaskRequest, TaskIdRequest,
 };
-use crate::server::state::Task;
-use rev_buf_reader::RevBufReader;
+use crate::server::state::{Task, TaskStatus};
 use std::env;
-use std::fs;
-use std::io::{BufRead, BufReader};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 pub fn get_server_host() -> String {
     let server_port = env::var("RTS_SERVER_PORT").unwrap_or_else(|_| "20110".to_string());
@@ -202,32 +200,86 @@ impl RtsClient {
         let task: Task = self
             .get_json(&format!("/tasks/info?task_id={}", query.task_id))
             .await?;
-        if let Some(log_path) = task.log_path {
-            let file = fs::File::open(log_path)?;
-            if !is_tail {
-                let reader = BufReader::new(file);
-                for line in reader.lines() {
-                    println!("{}", line?);
-                }
-            } else {
-                let reader = RevBufReader::new(file);
-                for line in
-                    reader
-                        .lines()
-                        .take(10)
-                        .collect::<Result<Vec<_>, _>>()
-                        .map(|mut v| {
-                            v.reverse();
-                            v
-                        })?
-                {
-                    println!("{}", line);
-                }
-            }
+        let is_finished = matches!(
+            task.status,
+            TaskStatus::Completed | TaskStatus::Failed | TaskStatus::Killed | TaskStatus::Skipped
+        );
+        if is_finished {
+            // 任务已结束：保持原有行为
+            self.print_log(&task, is_tail).await
+        } else {
+            // 任务仍在运行/等待：实时输出日志，任务结束后退出
+            self.follow_log(task_id, is_tail).await
+        }
+    }
+
+    /// 打印日志文件内容：非 tail 输出全部，tail 输出末尾 10 行
+    async fn print_log(&self, task: &Task, is_tail: bool) -> Result<(), CliError> {
+        if let Some(log_path) = &task.log_path {
+            let content = self.read_log_bytes(log_path).await?;
+            print_log_lines(&content, is_tail);
         } else {
             eprintln!("No log file");
         }
         Ok(())
+    }
+
+    /// 实时跟踪日志：初始输出已有内容（cat/tail），随后持续输出新增内容，任务结束时退出
+    async fn follow_log(&self, task_id: u32, is_tail: bool) -> Result<(), CliError> {
+        use tokio::io::{AsyncReadExt, AsyncSeekExt, SeekFrom};
+
+        let mut started = false; // 日志文件是否已出现并完成初始输出
+        let mut pos: u64 = 0;
+        let mut remaining: Vec<u8> = Vec::new();
+
+        loop {
+            let task: Task = self
+                .get_json(&format!("/tasks/info?task_id={}", task_id))
+                .await?;
+            let is_finished = matches!(
+                task.status,
+                TaskStatus::Completed
+                    | TaskStatus::Failed
+                    | TaskStatus::Killed
+                    | TaskStatus::Skipped
+            );
+
+            // 读取新增日志（任务可能尚未创建日志文件，此时跳过）
+            if let Some(log_path) = &task.log_path {
+                if let Ok(mut file) = tokio::fs::File::open(log_path).await {
+                    let len = file.metadata().await.map(|m| m.len()).unwrap_or(0);
+                    if !started {
+                        // 首次出现日志文件：cat 输出全部，tail 输出末尾 10 行
+                        let content = self.read_log_bytes(log_path).await.unwrap_or_default();
+                        print_log_lines(&content, is_tail);
+                        pos = content.len() as u64;
+                        started = true;
+                    } else if len > pos {
+                        let mut buf = vec![0u8; (len - pos) as usize];
+                        file.seek(SeekFrom::Start(pos)).await?;
+                        file.read_exact(&mut buf).await?;
+                        pos = len;
+                        emit_log_lines(&mut remaining, &buf, false);
+                    }
+                }
+            }
+
+            if is_finished {
+                // 任务结束：冲刷末尾没有换行的残余内容后退出
+                emit_log_lines(&mut remaining, &[], true);
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+        Ok(())
+    }
+
+    async fn read_log_bytes(&self, log_path: &Path) -> Result<Vec<u8>, CliError> {
+        use tokio::io::AsyncReadExt;
+        let mut file = tokio::fs::File::open(log_path).await?;
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf).await?;
+        Ok(buf)
     }
 
     pub async fn push_task(
@@ -298,6 +350,39 @@ impl RtsClient {
             gpu_threshold,
         };
         self.post_success("/configure", &data).await
+    }
+}
+
+/// 打印日志内容：非 tail 输出全部，tail 输出末尾 10 行
+fn print_log_lines(content: &[u8], is_tail: bool) {
+    let text = String::from_utf8_lossy(content);
+    let lines: Vec<&str> = text.lines().collect();
+    if is_tail {
+        for line in lines.iter().rev().take(10).rev() {
+            println!("{}", line);
+        }
+    } else {
+        for line in &lines {
+            println!("{}", line);
+        }
+    }
+}
+
+/// 追加新增日志字节并输出完整行；`flush` 时冲刷末尾没有换行的残余内容
+fn emit_log_lines(remaining: &mut Vec<u8>, new: &[u8], flush: bool) {
+    remaining.extend_from_slice(new);
+    loop {
+        match remaining.iter().position(|&b| b == b'\n') {
+            Some(i) => {
+                let line: Vec<u8> = remaining.drain(..=i).collect();
+                println!("{}", String::from_utf8_lossy(&line[..line.len() - 1]));
+            }
+            None => break,
+        }
+    }
+    if flush && !remaining.is_empty() {
+        println!("{}", String::from_utf8_lossy(remaining));
+        remaining.clear();
     }
 }
 

@@ -101,7 +101,7 @@ No Makefile, justfile, shell scripts, CI/CD, or Docker configurations exist.
 - No `anyhow`, `thiserror`, or `eyre` — manual `Display` + `Error` impls
 
 ### Async Patterns
-- **Runtime**: `tokio` with `rt-multi-thread`, `macros` (`#[tokio::main]`, `#[tokio::test]`), `process`
+- **Runtime**: `tokio` with `rt-multi-thread`, `macros` (`#[tokio::main]`, `#[tokio::test]`), `process`, `fs`, `io-util`, `time`
 - **Shared state**: `Arc<ServerState>` where each field is a `tokio::sync::Mutex<T>` (separate per-field locking)
 - **Internal event bus**: `tokio::sync::watch::channel(ChannelMessage)` — handlers send, `rx_worker` receives
 - **Concurrent spawn**: `tokio::try_join!(axum::serve(...), rx_worker_fut)` in `server.rs`
@@ -137,7 +137,10 @@ Tests use `#[tokio::test]` with `Result<(), Box<dyn Error>>` return. Setup: crea
 
 ### Log Handling
 - Task stdout/stderr written to `log_path` (default: `/tmp/rtx/{id}`)
-- `cat` reads forward via `BufReader`; `tail` reads backward via `rev_buf_reader`
+- `cat` (`rts do -c`) / `tail` (`rts do -t`) read the log file in `src/cli.rs` (`get_task_log`)
+- Finished tasks keep the old behavior: `cat` prints the whole log, `tail` prints the last 10 lines
+- Tasks still running/pending enter follow mode: print the initial content (all lines for `cat`, last 10 for `tail`), then stream new lines in real time by polling `/tasks/info` every 200ms, flushing remaining output and exiting once the task reaches a terminal status
+- `tokio::fs` + `AsyncReadExt`/`AsyncSeekExt` read the file by byte offset; partial lines are buffered across reads to avoid UTF-8 corruption
 - Empty log path → task output is discarded (`Stdio::null()`)
 
 ### Comments & Language
